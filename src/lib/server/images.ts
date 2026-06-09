@@ -11,6 +11,14 @@ sharp.concurrency(1);
 
 const THUMB_WIDTH = 400;
 
+// Refuse to fully decode absurdly large images. A single huge image (especially
+// a non-JPEG that can't shrink-on-load) could make libvips allocate gigabytes of
+// raw bitmap and get the process OOM-killed. Over this limit the image is
+// skipped (the recipe still imports without it).
+const MAX_INPUT_PIXELS = 60_000_000; // 60 megapixels
+
+const SHARP_OPTS = { failOn: 'none' as const, limitInputPixels: MAX_INPUT_PIXELS };
+
 /** Read the data directory at call time so tests can override it via env. */
 function dataDir(): string {
 	return process.env.DATA_DIR ?? './data';
@@ -87,7 +95,7 @@ export async function saveImageBuffer(
 ): Promise<string | null> {
 	if (buf.length === 0) return null;
 	try {
-		const meta = await sharp(buf, { failOn: 'none' }).metadata();
+		const meta = await sharp(buf, SHARP_OPTS).metadata();
 		const ext = FORMAT_EXT[meta.format ?? ''] ?? 'jpg';
 
 		const dir = recipeImageDir(recipeId);
@@ -95,7 +103,8 @@ export async function saveImageBuffer(
 		const relFull = join('images', recipeDirName(recipeId), `${randomUUID()}.${ext}`);
 		writeFileSync(join(dataDir(), relFull), buf);
 
-		await sharp(buf, { failOn: 'none' })
+		// sequentialRead lets libvips stream the decode (lower peak memory).
+		await sharp(buf, { ...SHARP_OPTS, sequentialRead: true })
 			.rotate()
 			.resize({ width: THUMB_WIDTH, withoutEnlargement: true })
 			.webp({ quality: 80 })
