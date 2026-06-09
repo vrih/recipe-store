@@ -10,6 +10,7 @@
 
 <nav>
 	<a href="/" class="brand">Recipe Store</a>
+	<a href="/import">Import</a>
 </nav>
 
 <main>
@@ -35,14 +36,25 @@
 		position: sticky;
 		top: 0;
 		z-index: 10;
+		display: flex;
+		align-items: baseline;
+		gap: 1.5rem;
 	}
 
 	.brand {
 		font-weight: 700;
 		font-size: 1.1rem;
+		letter-spacing: -0.01em;
+	}
+
+	nav a {
 		text-decoration: none;
 		color: inherit;
-		letter-spacing: -0.01em;
+	}
+
+	nav a:not(.brand) {
+		color: #57534e;
+		font-size: 0.95rem;
 	}
 
 	main {

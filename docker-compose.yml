@@ -8,6 +8,9 @@ services:
     environment:
       - PORT=3000
       - DATA_DIR=/data
+      # Required by adapter-node for CSRF protection on form/upload POSTs.
+      # Set to the origin you reach the app on (e.g. your Tailscale hostname).
+      - ORIGIN=${ORIGIN:-http://localhost:3000}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5}
     restart: unless-stopped
