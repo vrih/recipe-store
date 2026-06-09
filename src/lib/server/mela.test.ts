@@ -4,8 +4,10 @@ import {
 	parseMelaRecipe,
 	parseMelaArchive,
 	parseUpload,
+	walkUpload,
 	appleDateToUnixMs,
-	APPLE_EPOCH_OFFSET
+	APPLE_EPOCH_OFFSET,
+	type ParsedEntry
 } from './mela.js';
 
 const sampleRecipe = {
@@ -100,5 +102,43 @@ describe('parseUpload', () => {
 		const entries = parseUpload('bad.melarecipe', strToU8('{broken'));
 		expect(entries).toHaveLength(1);
 		expect(entries[0].error).toBeDefined();
+	});
+});
+
+describe('walkUpload (streaming)', () => {
+	async function collect(filename: string, data: Uint8Array): Promise<ParsedEntry[]> {
+		const out: ParsedEntry[] = [];
+		await walkUpload(filename, data, (entry) => {
+			// Copy fields, since the importer nulls entry.recipe after each call.
+			out.push({ source: entry.source, recipe: entry.recipe, error: entry.error });
+		});
+		return out;
+	}
+
+	it('streams recipes from a flat archive', async () => {
+		const zip = zipSync({
+			'a.melarecipe': recipeBytes(sampleRecipe),
+			'b.melarecipe': recipeBytes({ ...sampleRecipe, id: 'x/b', title: 'B' })
+		});
+		const entries = await collect('lib.melarecipes', zip);
+		expect(entries.map((e) => e.recipe?.title).sort()).toEqual(['B', 'Pancakes']);
+	});
+
+	it('recurses into nested archives and captures malformed entries', async () => {
+		const inner = zipSync({ 'good.melarecipe': recipeBytes(sampleRecipe) });
+		const zip = zipSync({
+			'nested.melarecipes': inner,
+			'bad.melarecipe': strToU8('{broken'),
+			'__MACOSX/._good.melarecipe': strToU8('junk')
+		});
+		const entries = await collect('lib.melarecipes', zip);
+		expect(entries.filter((e) => e.recipe)).toHaveLength(1);
+		expect(entries.filter((e) => e.error)).toHaveLength(1);
+	});
+
+	it('streams a single recipe file', async () => {
+		const entries = await collect('pancakes.melarecipe', recipeBytes(sampleRecipe));
+		expect(entries).toHaveLength(1);
+		expect(entries[0].recipe?.title).toBe('Pancakes');
 	});
 });

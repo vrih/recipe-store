@@ -109,3 +109,65 @@ export function parseUpload(filename: string, data: Uint8Array): ParsedEntry[] {
 function errMessage(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
+
+export type EntryCallback = (entry: ParsedEntry) => Promise<void> | void;
+
+/**
+ * Stream the recipes out of a `.melarecipes` archive, invoking `cb` for each one
+ * and freeing its decompressed buffer immediately after. This keeps peak memory
+ * to roughly one recipe at a time rather than the whole library — important for
+ * large imports on memory-constrained hosts (avoids OOM / exit 137).
+ */
+export async function walkArchive(
+	data: Uint8Array,
+	archiveName: string,
+	cb: EntryCallback
+): Promise<void> {
+	let files: Record<string, Uint8Array>;
+	try {
+		files = unzipSync(data);
+	} catch (err) {
+		await cb({ source: archiveName, error: `Could not read archive: ${errMessage(err)}` });
+		return;
+	}
+
+	for (const name of Object.keys(files)) {
+		const bytes = files[name];
+		if (name.endsWith('/') || bytes.length === 0 || isMacOsCruft(name)) {
+			delete files[name];
+			continue;
+		}
+		const lower = name.toLowerCase();
+		const source = `${archiveName}/${name}`;
+
+		if (lower.endsWith('.melarecipes') || lower.endsWith('.zip')) {
+			await walkArchive(bytes, source, cb);
+		} else if (lower.endsWith('.melarecipe') || lower.endsWith('.json')) {
+			try {
+				await cb({ source, recipe: parseMelaRecipe(bytes) });
+			} catch (err) {
+				await cb({ source, error: errMessage(err) });
+			}
+		}
+		// Free the decompressed buffer for this entry before moving on.
+		delete files[name];
+	}
+}
+
+/** Stream the recipes out of an uploaded file (single recipe or archive). */
+export async function walkUpload(
+	filename: string,
+	data: Uint8Array,
+	cb: EntryCallback
+): Promise<void> {
+	const lower = filename.toLowerCase();
+	if (lower.endsWith('.melarecipes') || lower.endsWith('.zip')) {
+		await walkArchive(data, filename, cb);
+		return;
+	}
+	try {
+		await cb({ source: filename, recipe: parseMelaRecipe(data) });
+	} catch (err) {
+		await cb({ source: filename, error: errMessage(err) });
+	}
+}

@@ -17,3 +17,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5}
     restart: unless-stopped
+    # Importing a large library decodes images and generates thumbnails. The
+    # importer streams recipes one at a time to keep memory bounded, but give
+    # the container enough headroom — at least ~512MB; 1GB is comfortable.
+    mem_limit: ${MEM_LIMIT:-1g}
