@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { page } from '$app/state';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -18,7 +19,10 @@
 	<title>{data.title || 'Recipe'}</title>
 </svelte:head>
 
-<p class="back"><a href="/">← All recipes</a></p>
+<div class="topbar">
+	<a class="back" href="/">← All recipes</a>
+	<a class="edit-link" href="/recipe/{page.params.eid}/edit">Edit</a>
+</div>
 
 <div class="title-row">
 	<h1>{data.title || 'Untitled'}</h1>
@@ -116,10 +120,25 @@
 {/if}
 
 <style>
-	.back a {
+	.topbar {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+	}
+
+	.topbar .back {
 		color: #57534e;
 		text-decoration: none;
 		font-size: 0.9rem;
+	}
+
+	.edit-link {
+		text-decoration: none;
+		font-size: 0.9rem;
+		color: #1c1917;
+		border: 1px solid #d6d3d1;
+		border-radius: 8px;
+		padding: 0.35rem 0.9rem;
 	}
 
 	.title-row {
