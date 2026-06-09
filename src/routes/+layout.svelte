@@ -17,6 +17,7 @@
 		<a href="/" class="brand">Recipe Store</a>
 		<a href="/recipe/new">New</a>
 		<a href="/import">Import</a>
+		<a href="/settings">Settings</a>
 	</nav>
 {/if}
 
@@ -46,6 +47,7 @@
 		display: flex;
 		align-items: baseline;
 		gap: 1.5rem;
+		flex-wrap: wrap;
 	}
 
 	.brand {
@@ -72,5 +74,20 @@
 
 	main.bare {
 		max-width: none;
+	}
+
+	/* Larger touch targets for phones and kitchen tablets. */
+	@media (max-width: 820px) {
+		nav a:not(.brand) {
+			padding: 0.35rem 0;
+		}
+
+		:global(button),
+		:global(.chip),
+		:global(input[type='text']),
+		:global(input[type='url']),
+		:global(input[type='search']) {
+			min-height: 44px;
+		}
 	}
 </style>
