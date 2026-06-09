@@ -46,6 +46,7 @@
 
 <h1>Import recipes</h1>
 <p>Upload one or more <code>.melarecipe</code> or <code>.melarecipes</code> files exported from Mela.</p>
+<p class="url-link">Or <a href="/import/url">import from a recipe URL →</a></p>
 
 <form onsubmit={submit}>
 	<label class="file">
