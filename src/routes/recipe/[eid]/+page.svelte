@@ -21,7 +21,10 @@
 
 <div class="topbar">
 	<a class="back" href="/">← All recipes</a>
-	<a class="edit-link" href="/recipe/{page.params.eid}/edit">Edit</a>
+	<div class="topbar-actions">
+		<a class="cook-link" href="/recipe/{page.params.eid}/cook">Cook</a>
+		<a class="edit-link" href="/recipe/{page.params.eid}/edit">Edit</a>
+	</div>
 </div>
 
 <div class="title-row">
@@ -132,13 +135,27 @@
 		font-size: 0.9rem;
 	}
 
-	.edit-link {
+	.topbar-actions {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.edit-link,
+	.cook-link {
 		text-decoration: none;
 		font-size: 0.9rem;
-		color: #1c1917;
-		border: 1px solid #d6d3d1;
 		border-radius: 8px;
 		padding: 0.35rem 0.9rem;
+	}
+
+	.edit-link {
+		color: #1c1917;
+		border: 1px solid #d6d3d1;
+	}
+
+	.cook-link {
+		background: #1c1917;
+		color: #fff;
 	}
 
 	.title-row {
