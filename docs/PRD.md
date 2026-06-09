@@ -161,9 +161,10 @@ CREATE TABLE recipe_tags (
   PRIMARY KEY (recipe_id, tag_id)
 );
 
--- Full-text search over titles, ingredients, instructions, notes, tags.
+-- Full-text search over title, overview, ingredients, instructions, tags.
+-- Notes and nutrition are intentionally excluded from search.
 CREATE VIRTUAL TABLE recipes_fts USING fts5(
-  title, text, ingredients, instructions, notes, tags,
+  title, text, ingredients, instructions, tags,
   content='', tokenize='unicode61'
 );
 
@@ -258,8 +259,8 @@ Notes:
 - **FR-IDX-4:** Sort options (recently added, recently updated, title A–Z).
 - **FR-IDX-5:** Filters: favourites only, "want to cook" only, and by one or
   more tags.
-- **FR-IDX-6:** Search box performing FTS across title/ingredients/instructions/
-  notes/tags, combinable with tag filters.
+- **FR-IDX-6:** Search box performing FTS across title/overview/ingredients/
+  instructions/tags (notes and nutrition excluded), combinable with tag filters.
 
 ### 7.2 Recipe view
 
@@ -441,7 +442,8 @@ This is a hard requirement: **concurrent users must not corrupt data.**
   package or host networking on a Tailscale-joined NAS). Outbound access is
   needed for URL scraping and the Anthropic API.
 - **Backup:** Stop-free SQLite backups via the `.backup`/online-backup API on a
-  schedule, plus DSM snapshots of the data volume.
+  **nightly** schedule, retaining the **14** most recent backups (older ones
+  pruned automatically), plus DSM snapshots of the data volume.
 
 ---
 
@@ -460,8 +462,8 @@ This is a hard requirement: **concurrent users must not corrupt data.**
    (§7.7), persisted strike-through.
 7. **M6 — URL import (hybrid).** JSON-LD scraper, then Claude (Haiku) fallback,
    both into the review editor; content sanitization.
-8. **M7 — Backups & polish.** Scheduled SQLite/online backups, responsive and
-   kitchen-tablet refinements, test coverage for high-risk logic.
+8. **M7 — Backups & polish.** Nightly SQLite/online backups (keep 14),
+   responsive and kitchen-tablet refinements, test coverage for high-risk logic.
 
 ---
 
@@ -479,6 +481,8 @@ This is a hard requirement: **concurrent users must not corrupt data.**
 | Mela-format export (round-trip) | **Out of scope for v1**; portability via volume/SQLite backups   |
 | Yield/serving scaling           | **Out of scope for v1** (future/stretch)                        |
 | Want-to-cook flag               | Store on import; expose as a simple index filter, no own screen  |
+| Search scope                    | title + overview + ingredients + instructions + tags; **notes/nutrition excluded** |
+| Backup cadence                  | **Nightly**, retain **14** most recent                          |
 
 ### 12.2 Remaining questions
 
@@ -486,10 +490,6 @@ This is a hard requirement: **concurrent users must not corrupt data.**
    newlines (§7.7) matches how your Mela recipes are actually written — some
    recipes may use single newlines between every line. Worth checking against a
    sample of your real library during M1.
-2. **Search scope:** is title + ingredients + instructions + notes + tags the
-   right FTS surface, or should notes/nutrition be excluded from search?
-3. **Backup cadence:** desired schedule/retention for the automated SQLite
-   backups in M7 (e.g. nightly, keep 14)?
 
 ---
 
