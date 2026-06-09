@@ -1,26 +1,23 @@
 import { json, error } from '@sveltejs/kit';
+import { Readable } from 'node:stream';
 import type { RequestHandler } from './$types';
 import db from '$lib/server/db';
-import { importUploads, type ConflictMode } from '$lib/server/import';
+import { importStream, type ConflictMode } from '$lib/server/import';
 
-export const POST: RequestHandler = async ({ request }) => {
-	const form = await request.formData();
-	const files = form.getAll('files').filter((f): f is File => f instanceof File);
-	const conflict: ConflictMode = form.get('conflict') === 'overwrite' ? 'overwrite' : 'skip';
+/**
+ * Import a single uploaded file, streamed as the raw request body (not
+ * multipart). Streaming the body straight into the unzip keeps memory bounded
+ * — the whole library is never held in the heap. The client posts one file per
+ * request with ?name= and ?conflict=, merging the per-file summaries.
+ */
+export const POST: RequestHandler = async ({ request, url }) => {
+	const name = url.searchParams.get('name') ?? 'upload.melarecipes';
+	const conflict: ConflictMode = url.searchParams.get('conflict') === 'overwrite' ? 'overwrite' : 'skip';
 
-	if (files.length === 0) {
-		throw error(400, 'No files uploaded');
-	}
+	if (!request.body) throw error(400, 'No file body');
 
-	// Read each upload into a buffer, then stream-import (parse + persist one
-	// recipe at a time) so a large library doesn't exhaust memory.
-	const uploads = await Promise.all(
-		files.map(async (file) => ({
-			name: file.name,
-			bytes: new Uint8Array(await file.arrayBuffer())
-		}))
-	);
-
-	const summary = await importUploads(db, uploads, conflict);
+	// Node's Readable is an async-iterable of Buffers (Uint8Array).
+	const chunks = Readable.fromWeb(request.body as Parameters<typeof Readable.fromWeb>[0]);
+	const summary = await importStream(db, name, chunks, conflict);
 	return json(summary);
 };

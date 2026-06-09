@@ -10,6 +10,7 @@
 	let files = $state<FileList | null>(null);
 	let conflict = $state<'skip' | 'overwrite'>('skip');
 	let busy = $state(false);
+	let progress = $state<string | null>(null);
 	let summary = $state<ImportSummary | null>(null);
 	let errorMsg = $state<string | null>(null);
 
@@ -21,21 +22,38 @@
 		summary = null;
 		errorMsg = null;
 
-		const body = new FormData();
-		for (const file of Array.from(files)) body.append('files', file);
-		body.append('conflict', conflict);
+		// Post one file per request as a raw streamed body (not multipart), so the
+		// server never buffers the whole library in memory. Merge per-file results.
+		const total: ImportSummary = { added: 0, updated: 0, skipped: 0, failed: 0, failures: [] };
+		const list = Array.from(files);
 
 		try {
-			const res = await fetch('/api/import', { method: 'POST', body });
-			if (!res.ok) {
-				errorMsg = (await res.text()) || `Import failed (${res.status})`;
-			} else {
-				summary = await res.json();
+			for (let i = 0; i < list.length; i++) {
+				const file = list[i];
+				progress = list.length > 1 ? `Importing ${i + 1} of ${list.length}: ${file.name}…` : null;
+				const qs = new URLSearchParams({ name: file.name, conflict });
+				const res = await fetch(`/api/import?${qs}`, {
+					method: 'POST',
+					headers: { 'content-type': 'application/octet-stream' },
+					body: file
+				});
+				if (!res.ok) {
+					errorMsg = (await res.text()) || `Import failed (${res.status})`;
+					return;
+				}
+				const s: ImportSummary = await res.json();
+				total.added += s.added;
+				total.updated += s.updated;
+				total.skipped += s.skipped;
+				total.failed += s.failed;
+				total.failures.push(...s.failures);
 			}
+			summary = total;
 		} catch (err) {
 			errorMsg = err instanceof Error ? err.message : 'Network error';
 		} finally {
 			busy = false;
+			progress = null;
 		}
 	}
 </script>
@@ -67,6 +85,10 @@
 	<button type="submit" disabled={busy || !files || files.length === 0}>
 		{busy ? 'Importing…' : 'Import'}
 	</button>
+
+	{#if progress}
+		<p class="progress">{progress}</p>
+	{/if}
 </form>
 
 {#if errorMsg}
@@ -137,6 +159,11 @@
 
 	.error {
 		color: #b91c1c;
+	}
+
+	.progress {
+		color: #57534e;
+		font-size: 0.9rem;
 	}
 
 	.summary {
