@@ -1,8 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import db from '$lib/server/db';
-import { parseUpload, type ParsedEntry } from '$lib/server/mela';
-import { importEntries, type ConflictMode } from '$lib/server/import';
+import { importUploads, type ConflictMode } from '$lib/server/import';
 
 export const POST: RequestHandler = async ({ request }) => {
 	const form = await request.formData();
@@ -13,12 +12,15 @@ export const POST: RequestHandler = async ({ request }) => {
 		throw error(400, 'No files uploaded');
 	}
 
-	const entries: ParsedEntry[] = [];
-	for (const file of files) {
-		const bytes = new Uint8Array(await file.arrayBuffer());
-		entries.push(...parseUpload(file.name, bytes));
-	}
+	// Read each upload into a buffer, then stream-import (parse + persist one
+	// recipe at a time) so a large library doesn't exhaust memory.
+	const uploads = await Promise.all(
+		files.map(async (file) => ({
+			name: file.name,
+			bytes: new Uint8Array(await file.arrayBuffer())
+		}))
+	);
 
-	const summary = await importEntries(db, entries, conflict);
+	const summary = await importUploads(db, uploads, conflict);
 	return json(summary);
 };

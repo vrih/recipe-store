@@ -3,6 +3,12 @@ import { mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { createHash, randomUUID } from 'crypto';
 
+// Bound sharp/libvips memory: disable the operation cache and serialize work.
+// Without this, a large batch import (many images) balloons native memory and
+// can get the container OOM-killed (exit 137).
+sharp.cache(false);
+sharp.concurrency(1);
+
 const THUMB_WIDTH = 400;
 
 /** Read the data directory at call time so tests can override it via env. */
