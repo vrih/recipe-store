@@ -16,8 +16,15 @@ export const POST: RequestHandler = async ({ request, url }) => {
 
 	if (!request.body) throw error(400, 'No file body');
 
+	const rssMB = () => Math.round(process.memoryUsage().rss / 1024 / 1024);
+	console.log(`[import] streaming "${name}" (conflict=${conflict}); rss=${rssMB()}MB`);
+
 	// Node's Readable is an async-iterable of Buffers (Uint8Array).
 	const chunks = Readable.fromWeb(request.body as Parameters<typeof Readable.fromWeb>[0]);
 	const summary = await importStream(db, name, chunks, conflict);
+
+	console.log(
+		`[import] done "${name}": +${summary.added} ~${summary.updated} skip ${summary.skipped} fail ${summary.failed}; rss=${rssMB()}MB`
+	);
 	return json(summary);
 };
