@@ -1,8 +1,11 @@
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
 import type { MelaRecipe, ParsedEntry } from './mela.js';
-import { appleDateToUnixMs } from './mela.js';
+import { appleDateToUnixMs, walkUpload } from './mela.js';
 import { saveRecipeImages, deleteRecipeImages } from './images.js';
+
+/** Cap on retained failure records so a huge bad import can't itself OOM. */
+const MAX_FAILURES = 200;
 
 export type ConflictMode = 'skip' | 'overwrite';
 
@@ -140,21 +143,60 @@ export async function importEntries(
 	const summary: ImportSummary = { added: 0, updated: 0, skipped: 0, failed: 0, failures: [] };
 
 	for (const entry of entries) {
-		if (entry.error || !entry.recipe) {
-			summary.failed++;
+		await importOne(db, entry, conflict, summary);
+	}
+
+	return summary;
+}
+
+/** Import a single parsed entry into the running summary. */
+async function importOne(
+	db: Database.Database,
+	entry: ParsedEntry,
+	conflict: ConflictMode,
+	summary: ImportSummary
+): Promise<void> {
+	if (entry.error || !entry.recipe) {
+		summary.failed++;
+		if (summary.failures.length < MAX_FAILURES) {
 			summary.failures.push({ source: entry.source, error: entry.error ?? 'No recipe data' });
-			continue;
 		}
-		try {
-			const result = await upsertRecipe(db, entry.recipe, conflict);
-			summary[result]++;
-		} catch (err) {
-			summary.failed++;
+		return;
+	}
+	try {
+		const result = await upsertRecipe(db, entry.recipe, conflict);
+		summary[result]++;
+	} catch (err) {
+		summary.failed++;
+		if (summary.failures.length < MAX_FAILURES) {
 			summary.failures.push({
 				source: entry.source,
 				error: err instanceof Error ? err.message : String(err)
 			});
 		}
+	} finally {
+		// Release the recipe (and its base64 image data) for GC before the next.
+		entry.recipe = undefined;
+	}
+}
+
+/**
+ * Stream-import one or more uploaded files. Recipes are parsed, imported, and
+ * freed one at a time (decompressed archive buffers are released as we go), so
+ * peak memory stays roughly constant regardless of library size — this is what
+ * keeps a large `.melarecipes` import from OOM-killing the container.
+ */
+export async function importUploads(
+	db: Database.Database,
+	uploads: { name: string; bytes: Uint8Array }[],
+	conflict: ConflictMode = 'skip'
+): Promise<ImportSummary> {
+	const summary: ImportSummary = { added: 0, updated: 0, skipped: 0, failed: 0, failures: [] };
+
+	for (const upload of uploads) {
+		await walkUpload(upload.name, upload.bytes, (entry) =>
+			importOne(db, entry, conflict, summary)
+		);
 	}
 
 	return summary;
