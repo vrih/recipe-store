@@ -46,19 +46,19 @@ function firstImagePath(db: Database.Database, recipeId: string): string | null 
 	return row?.path ?? null;
 }
 
-/** List recipes as cards for the index grid. */
-export function listRecipeCards(db: Database.Database, sort: SortKey = 'created'): RecipeCard[] {
-	const rows = db
-		.prepare(
-			`SELECT r.id, r.title, r.favorite, r.want_to_cook,
-              (SELECT path FROM recipe_images WHERE recipe_id = r.id ORDER BY position LIMIT 1) AS img
-       FROM recipes r
-       ORDER BY ${SORT_SQL[sort]}`
-		)
-		.all() as (Pick<RecipeRow, 'id' | 'title' | 'favorite' | 'want_to_cook'> & {
-		img: string | null;
-	})[];
+export interface SearchParams {
+	q?: string;
+	tags?: string[];
+	favorite?: boolean;
+	wantToCook?: boolean;
+	sort?: SortKey;
+}
 
+type CardRow = Pick<RecipeRow, 'id' | 'title' | 'favorite' | 'want_to_cook'> & {
+	img: string | null;
+};
+
+function toCards(rows: CardRow[]): RecipeCard[] {
 	return rows.map((r) => ({
 		id: r.id,
 		title: r.title,
@@ -66,6 +66,86 @@ export function listRecipeCards(db: Database.Database, sort: SortKey = 'created'
 		want_to_cook: !!r.want_to_cook,
 		thumb: r.img ? thumbPathFor(r.img) : null
 	}));
+}
+
+/**
+ * Turn free-text into a safe FTS5 prefix query: each token is quoted (so
+ * punctuation can't break the syntax) and suffixed with `*` for prefix match;
+ * tokens are implicitly ANDed. Returns null if there are no usable tokens.
+ */
+function toFtsQuery(q: string): string | null {
+	const tokens = q.match(/[\p{L}\p{N}]+/gu);
+	if (!tokens || tokens.length === 0) return null;
+	return tokens.map((t) => `"${t}"*`).join(' ');
+}
+
+/** List recipes as cards for the index grid (no filters). */
+export function listRecipeCards(db: Database.Database, sort: SortKey = 'created'): RecipeCard[] {
+	return searchRecipeCards(db, { sort });
+}
+
+/**
+ * Search/filter recipes for the index grid. Combines FTS (title/overview/
+ * ingredients/instructions) OR tag-name match for the text query, AND-ed with
+ * tag filters and the favourite / want-to-cook flags.
+ */
+export function searchRecipeCards(db: Database.Database, p: SearchParams): RecipeCard[] {
+	const sort = p.sort ?? 'created';
+	const where: string[] = [];
+	const params: Record<string, unknown> = {};
+
+	if (p.q && p.q.trim()) {
+		const fts = toFtsQuery(p.q);
+		const like = `%${p.q.trim()}%`;
+		params.qlike = like;
+		if (fts) {
+			params.fts = fts;
+			where.push(
+				`(r.rowid IN (SELECT rowid FROM recipes_fts WHERE recipes_fts MATCH @fts)
+          OR EXISTS (SELECT 1 FROM recipe_tags rt JOIN tags t ON t.id = rt.tag_id
+                     WHERE rt.recipe_id = r.id AND t.name LIKE @qlike))`
+			);
+		} else {
+			// Query had no tokens (pure punctuation); fall back to tag-name LIKE only.
+			where.push(
+				`EXISTS (SELECT 1 FROM recipe_tags rt JOIN tags t ON t.id = rt.tag_id
+                 WHERE rt.recipe_id = r.id AND t.name LIKE @qlike)`
+			);
+		}
+	}
+
+	(p.tags ?? []).forEach((tag, i) => {
+		const key = `tag${i}`;
+		params[key] = tag;
+		where.push(
+			`EXISTS (SELECT 1 FROM recipe_tags rt JOIN tags t ON t.id = rt.tag_id
+               WHERE rt.recipe_id = r.id AND t.name = @${key} COLLATE NOCASE)`
+		);
+	});
+
+	if (p.favorite) where.push('r.favorite = 1');
+	if (p.wantToCook) where.push('r.want_to_cook = 1');
+
+	const sql = `
+    SELECT r.id, r.title, r.favorite, r.want_to_cook,
+           (SELECT path FROM recipe_images WHERE recipe_id = r.id ORDER BY position LIMIT 1) AS img
+    FROM recipes r
+    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+    ORDER BY ${SORT_SQL[sort]}`;
+
+	return toCards(db.prepare(sql).all(params) as CardRow[]);
+}
+
+/** All tag names with their recipe counts, for the filter UI. */
+export function listTags(db: Database.Database): { name: string; count: number }[] {
+	return db
+		.prepare(
+			`SELECT t.name AS name, COUNT(rt.recipe_id) AS count
+       FROM tags t JOIN recipe_tags rt ON rt.tag_id = t.id
+       GROUP BY t.id
+       ORDER BY t.name COLLATE NOCASE`
+		)
+		.all() as { name: string; count: number }[];
 }
 
 /** Full recipe row by id, or null. */
