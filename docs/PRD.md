@@ -79,7 +79,9 @@ first-class web-URL import and is designed for the latest Safari only.
 | Database           | SQLite via `better-sqlite3` (synchronous, in-process)         |
 | Image storage      | Files on disk under a data volume; DB stores relative paths   |
 | URL scraping       | Server-side fetch + JSON-LD / schema.org Recipe parsing       |
-| Claude fallback    | Anthropic API (`claude-opus-4-8`) called server-side          |
+| Claude fallback    | Anthropic API (`claude-haiku-4-5`) called server-side         |
+| Image processing   | `sharp` for decode + thumbnail generation                     |
+| Markdown rendering | Markdown-to-HTML with **HTML sanitization** (see §9.2)        |
 | Styling            | Plain CSS / CSS modules (no need for cross-browser frameworks)|
 | Packaging          | Docker image + `docker-compose.yml`                           |
 | Deployment         | Synology Container Manager, data on a mounted volume           |
@@ -159,10 +161,22 @@ CREATE TABLE recipe_tags (
   PRIMARY KEY (recipe_id, tag_id)
 );
 
--- Full-text search over titles, ingredients, instructions, notes, tags.
+-- Full-text search over title, overview, ingredients, instructions, tags.
+-- Notes and nutrition are intentionally excluded from search.
 CREATE VIRTUAL TABLE recipes_fts USING fts5(
-  title, text, ingredients, instructions, notes, tags,
+  title, text, ingredients, instructions, tags,
   content='', tokenize='unicode61'
+);
+
+-- Cooking-mode strike-through progress, persisted per recipe (§7.4).
+-- 'kind' is 'ingredient' | 'step'; 'item_key' is the stable line key (§7.7).
+CREATE TABLE cook_progress (
+  recipe_id  TEXT NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL,
+  item_key   TEXT NOT NULL,
+  done       INTEGER NOT NULL DEFAULT 1,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (recipe_id, kind, item_key)
 );
 ```
 
@@ -170,9 +184,15 @@ Notes:
 
 - **Categories ↔ tags:** Mela "categories" map onto our `tags`. (Mela disallows
   commas in category names; we keep that constraint on import.)
-- **Thumbnails** are derived from `recipe_images.position = 0`. A resized
-  thumbnail is generated and cached on disk on first import/save.
-- **FTS5** powers free-text search; tag filtering uses the relational tables.
+- **Thumbnails** are derived from `recipe_images.position = 0`. `sharp`
+  generates a resized thumbnail cached on disk on first import/save.
+- **FTS5** is a contentless (`content=''`) index; the app keeps it in sync with
+  `recipes`/`recipe_tags` via **triggers** (insert/update/delete) so search
+  results never drift from the source rows. Tag filtering uses the relational
+  tables.
+- **`cook_progress`** is keyed by recipe only (no user dimension), consistent
+  with the no-auth, fully-trusted access model — two cooks on the same recipe
+  share progress. Acceptable for a household; revisit if it becomes annoying.
 
 ---
 
@@ -220,9 +240,10 @@ Notes:
 - **FR-IMP-5:** Import runs in a single DB transaction per recipe; a malformed
   recipe is reported and skipped without aborting the whole batch.
 - **FR-IMP-6:** Show an import summary (added / updated / skipped / failed).
-- **FR-IMP-7 (round-trip):** Provide **export** to `.melarecipe` /
-  `.melarecipes` so data is never trapped. (Stretch, but strongly desired for
-  parity and backup confidence.)
+- **FR-IMP-7 (portability):** Data portability in v1 is provided by **backups**
+  of the data volume (SQLite file + images), not by a Mela-format export.
+  Round-trip `.melarecipe` / `.melarecipes` export is **out of scope for v1**
+  (may be reconsidered later). See §10 for the backup approach.
 
 ---
 
@@ -234,12 +255,12 @@ Notes:
   title.
 - **FR-IDX-2:** Cards lazy-load images; the grid stays smooth with hundreds of
   recipes.
-- **FR-IDX-3:** Visible indicators for favourite and (optionally) "want to
-  cook".
+- **FR-IDX-3:** Visible indicators for favourite and "want to cook".
 - **FR-IDX-4:** Sort options (recently added, recently updated, title A–Z).
-- **FR-IDX-5:** Filters: favourites only, and by one or more tags.
-- **FR-IDX-6:** Search box performing FTS across title/ingredients/instructions/
-  notes/tags, combinable with tag filters.
+- **FR-IDX-5:** Filters: favourites only, "want to cook" only, and by one or
+  more tags.
+- **FR-IDX-6:** Search box performing FTS across title/overview/ingredients/
+  instructions/tags (notes and nutrition excluded), combinable with tag filters.
 
 ### 7.2 Recipe view
 
@@ -271,17 +292,22 @@ Notes:
 - **FR-COOK-1:** Distraction-free layout: hide global navigation/chrome; show
   only ingredients and instructions (and optionally times/yield).
 - **FR-COOK-2:** Keep the screen awake using the **Screen Wake Lock API**
-  (supported in modern Safari). Re-acquire the lock on visibility change;
-  release it on exit. Show a clear on/off indicator and a graceful message if
-  the lock is unavailable.
+  (supported in modern Safari). Re-acquire the lock on `visibilitychange` (the
+  lock is dropped when the tab is backgrounded); release it on exit. Show a
+  clear on/off indicator and a graceful message if the lock is unavailable.
+  **Caveat:** the Wake Lock only holds while the tab is foregrounded and visible
+  — it cannot override an OS-level auto-lock once the device itself sleeps. This
+  should be communicated in-product (e.g. a hint to disable auto-lock on a
+  dedicated kitchen tablet).
 - **FR-COOK-3:** Tap an ingredient or step to **strike it through** as done;
-  tap again to undo. Strike-through state is per cooking session.
+  tap again to undo. Strike-through state **persists per recipe** (stored in
+  `cook_progress`, §5) so a cook can leave and return mid-recipe without losing
+  progress. Provide a "reset progress" action to clear all strikes for the
+  recipe.
 - **FR-COOK-4:** Larger typography and generous tap targets for kitchen/tablet
-  use. Optional yield/serving scaling is a stretch goal.
+  use. Yield/serving scaling is **out of scope for v1** (future/stretch — see
+  §12).
 - **FR-COOK-5:** Easy exit back to the recipe view.
-- **Open question:** should strike-through progress persist if the screen is
-  locked/reloaded mid-cook, or always reset on entry? (Default: reset on entry,
-  persist within a session via local state.)
 
 ### 7.5 URL import (hybrid)
 
@@ -291,8 +317,10 @@ Notes:
   downloading the lead image. Pre-fill the editor for review before saving.
 - **FR-URL-2 (Claude fallback):** When structured data is missing or
   incomplete, offer a Claude-assisted conversion: the server sends the fetched
-  page content (or the URL) to the Anthropic API (`claude-opus-4-8`) and
-  requests a strict `.melarecipe`-shaped JSON, which then pre-fills the editor.
+  page content (or the URL) to the Anthropic API (`claude-haiku-4-5`, chosen for
+  low cost on routine extraction) and requests a strict `.melarecipe`-shaped
+  JSON via a defined response schema, which then pre-fills the editor. The model
+  is configurable via env var so it can be upgraded for hard pages if needed.
 - **FR-URL-3:** Both paths land in the **same review-then-save** editor flow; no
   silent writes. The original URL is stored in `link`.
 - **FR-URL-4:** Network/parse failures produce a clear, actionable error;
@@ -311,6 +339,27 @@ Notes:
 - **FR-TAG-4:** Tag management is implicit (tags with no recipes can be pruned);
   a dedicated tag admin screen is a stretch goal.
 
+### 7.7 Ingredient and step parsing
+
+Mela stores `ingredients` and `instructions` as **single strings**, but the
+view, cooking mode, and strike-through need discrete items. The app derives
+structured items deterministically:
+
+- **FR-PARSE-1 (ingredients):** Split on newlines. A line beginning with `#` is
+  a **section header** (rendered as a heading, not strikeable). Blank lines are
+  separators. Each remaining line is one strikeable ingredient.
+- **FR-PARSE-2 (instructions):** Split into steps on blank-line-separated
+  paragraphs / newlines (markdown headings start a new labelled group). Each
+  step is individually strikeable.
+- **FR-PARSE-3 (stable keys):** Each item gets a stable `item_key` (e.g. a hash
+  of `kind + normalized text`, with an index suffix to disambiguate duplicates)
+  so `cook_progress` survives benign re-renders. Editing a recipe's text may
+  invalidate keys; on save, orphaned `cook_progress` rows for that recipe are
+  cleared.
+- **FR-PARSE-4:** Parsing is presentation-layer only — the original Mela strings
+  remain the source of truth in `recipes`, preserving lossless round-trip with
+  the imported data.
+
 ---
 
 ## 8. Non-functional requirements
@@ -328,10 +377,20 @@ Notes:
   mounted data directory so DSM snapshots/Hyper Backup cover it.
 - **NFR-ACCESS:** No authentication by design; the app must never assume it is
   internet-exposed.
+- **NFR-TEST:** Automated tests for the high-risk logic: Mela import (incl.
+  nested `.melarecipes`, dedupe/upsert, base64 images), ingredient/step parsing
+  (§7.7), optimistic-locking conflict behaviour, and the URL scraper's JSON-LD
+  mapping. A SessionStart hook should let tests/linters run in web sessions.
+- **NFR-SEC:** Even on a trusted Tailnet, treat **imported content as
+  untrusted** (URL-imported pages and Mela files can contain hostile markup).
+  Sanitize all rendered HTML (§9.2); validate/limit uploaded file sizes and
+  decoded image types; never execute fetched content.
 
 ---
 
-## 9. Concurrency and data integrity
+## 9. Concurrency, integrity, and content safety
+
+### 9.1 Concurrency and integrity
 
 This is a hard requirement: **concurrent users must not corrupt data.**
 
@@ -353,6 +412,17 @@ This is a hard requirement: **concurrent users must not corrupt data.**
 - **Import safety:** Batch imports commit per-recipe so a failure mid-batch
   leaves a consistent database and a clear report.
 
+### 9.2 Content safety (sanitization)
+
+- Markdown fields (`text`, `instructions`, `notes`, `nutrition`) and ingredient
+  lines are rendered through a markdown renderer with **HTML output
+  sanitization** (allowlist of safe tags/attributes), so raw or embedded HTML
+  from imported recipes cannot inject script or unexpected markup.
+- URL-scraped and Claude-generated content is treated identically to file
+  imports — it always lands in the review editor and is sanitized on render.
+- Uploaded files and decoded images are size- and type-checked before being
+  written to disk.
+
 ---
 
 ## 10. Deployment (Synology DiskStation)
@@ -367,11 +437,13 @@ This is a hard requirement: **concurrent users must not corrupt data.**
   - `PORT` — listen port.
   - `DATA_DIR` — defaults to `/data`.
   - `ANTHROPIC_API_KEY` — optional; enables the Claude URL-import fallback.
+  - `ANTHROPIC_MODEL` — optional; defaults to `claude-haiku-4-5`.
 - **Networking:** Container reachable only over the Tailnet (via DSM's Tailscale
   package or host networking on a Tailscale-joined NAS). Outbound access is
   needed for URL scraping and the Anthropic API.
 - **Backup:** Stop-free SQLite backups via the `.backup`/online-backup API on a
-  schedule, plus DSM snapshots of the data volume.
+  **nightly** schedule, retaining the **14** most recent backups (older ones
+  pruned automatically), plus DSM snapshots of the data volume.
 
 ---
 
@@ -385,29 +457,39 @@ This is a hard requirement: **concurrent users must not corrupt data.**
    markdown rendering, favourite toggle.
 4. **M3 — Edit & create.** Full editor with optimistic locking, image
    management, tag editing, delete.
-5. **M4 — Search & tags.** FTS search, tag filters, sorts.
-6. **M5 — Cooking mode.** Distraction-free layout, Wake Lock, strike-through.
-7. **M6 — URL import (hybrid).** JSON-LD scraper, then Claude fallback, both
-   into the review editor.
-8. **M7 — Export & polish.** `.melarecipe`/`.melarecipes` export, backups,
-   responsive/kitchen-tablet refinements.
+5. **M4 — Search & tags.** FTS search (with sync triggers), tag filters, sorts.
+6. **M5 — Cooking mode.** Distraction-free layout, Wake Lock, item parsing
+   (§7.7), persisted strike-through.
+7. **M6 — URL import (hybrid).** JSON-LD scraper, then Claude (Haiku) fallback,
+   both into the review editor; content sanitization.
+8. **M7 — Backups & polish.** Nightly SQLite/online backups (keep 14),
+   responsive and kitchen-tablet refinements, test coverage for high-risk logic.
 
 ---
 
-## 12. Open questions
+## 12. Decisions log and remaining questions
 
-1. **Cooking-mode persistence:** reset strike-through on every entry, or persist
-   per recipe between sessions? (Proposed default: reset on entry.)
-2. **Export priority:** is round-trip Mela export needed in v1, or acceptable as
-   a fast-follow? (Recommended: at least a raw DB/image backup in v1; full Mela
-   export in M7.)
-3. **Want-to-cook list:** Mela has a "Want to Cook" flag. We store it on import;
-   should it be a surfaced filter/view in v1, or hidden? (Proposed: store +
-   simple filter, no dedicated screen.)
-4. **Yield scaling in cooking mode:** desired in v1 or future? (Proposed:
-   future/stretch.)
-5. **Anthropic model/cost:** confirm using `claude-opus-4-8` for the fallback vs
-   a cheaper model for routine conversions.
+### 12.1 Resolved decisions
+
+| Decision                        | Outcome                                                          |
+| ------------------------------- | ---------------------------------------------------------------- |
+| Stack                           | Node + SvelteKit + `better-sqlite3`                              |
+| Deployment                      | Docker on Synology Container Manager                             |
+| URL import                      | Hybrid: JSON-LD scraper first, Claude fallback for messy pages   |
+| Claude model for fallback       | `claude-haiku-4-5` (configurable via `ANTHROPIC_MODEL`)          |
+| Cooking-mode strike-through     | **Persist per recipe** (with a reset action)                    |
+| Mela-format export (round-trip) | **Out of scope for v1**; portability via volume/SQLite backups   |
+| Yield/serving scaling           | **Out of scope for v1** (future/stretch)                        |
+| Want-to-cook flag               | Store on import; expose as a simple index filter, no own screen  |
+| Search scope                    | title + overview + ingredients + instructions + tags; **notes/nutrition excluded** |
+| Backup cadence                  | **Nightly**, retain **14** most recent                          |
+
+### 12.2 Remaining questions
+
+1. **Instruction step delimiter:** confirm splitting steps on blank lines /
+   newlines (§7.7) matches how your Mela recipes are actually written — some
+   recipes may use single newlines between every line. Worth checking against a
+   sample of your real library during M1.
 
 ---
 
