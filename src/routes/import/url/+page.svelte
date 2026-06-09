@@ -7,9 +7,17 @@
 
 	let url = $state('');
 	let fetching = $state(false);
+	let pasting = $state(false);
+	let showPaste = $state(false);
 
 	// When a fetch succeeds, `form.fetched` carries the pre-filled values.
 	const fetched = $derived(form && 'fetched' in form && form.fetched ? form : null);
+	const blocked = $derived(form && 'blocked' in form && form.blocked);
+
+	// Open the paste fallback automatically when the site blocked our fetch.
+	$effect(() => {
+		if (blocked) showPaste = true;
+	});
 </script>
 
 <svelte:head>
@@ -42,10 +50,15 @@
 		<input type="hidden" name="method" value="auto" />
 		<button type="submit" disabled={fetching}>{fetching ? 'Fetching…' : 'Fetch recipe'}</button>
 	</div>
+	<p class="paste-toggle">
+		<button type="button" class="linklike" onclick={() => (showPaste = !showPaste)}>
+			{showPaste ? 'Hide' : 'Some sites block automated access — paste the page source instead'}
+		</button>
+	</p>
 </form>
 
-{#if form && 'message' in form && form.message}
-	<div class="notice" class:warn={form && 'noStructuredData' in form}>
+{#if form && 'message' in form && form.message && !fetched}
+	<div class="notice" class:warn={blocked || (form && 'noStructuredData' in form)}>
 		<p>{form.message}</p>
 		{#if form && 'noStructuredData' in form && form.noStructuredData && 'claudeAvailable' in form && form.claudeAvailable}
 			<form
@@ -65,6 +78,33 @@
 			</form>
 		{/if}
 	</div>
+{/if}
+
+{#if showPaste && !fetched}
+	<form
+		class="paste"
+		method="POST"
+		action="?/paste"
+		use:enhance={() => {
+			pasting = true;
+			return async ({ update }) => {
+				await update();
+				pasting = false;
+			};
+		}}
+	>
+		<label>
+			<span>Paste page source</span>
+			<small>
+				Open the recipe in your browser, view the page source (⌘/Ctrl+U), select all
+				(⌘/Ctrl+A), copy, and paste it here. We'll read the recipe data out of it — no
+				request to the site is made.
+			</small>
+			<textarea name="html" rows="6" placeholder="<!doctype html> …"></textarea>
+		</label>
+		<input type="hidden" name="url" value={url || (form && 'url' in form ? form.url : '')} />
+		<button type="submit" disabled={pasting}>{pasting ? 'Extracting…' : 'Extract from pasted source'}</button>
+	</form>
 {/if}
 
 {#if fetched}
@@ -102,6 +142,52 @@
 		display: flex;
 		gap: 0.5rem;
 		max-width: 600px;
+	}
+	.paste-toggle {
+		max-width: 600px;
+		margin: 0.5rem 0 0;
+	}
+	.linklike {
+		background: none;
+		border: none;
+		padding: 0;
+		color: #57534e;
+		font: inherit;
+		font-size: 0.85rem;
+		text-decoration: underline;
+		cursor: pointer;
+	}
+	.paste {
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+		align-items: flex-start;
+		max-width: 600px;
+		margin-top: 1rem;
+	}
+	.paste label {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		width: 100%;
+	}
+	.paste span {
+		font-weight: 600;
+		font-size: 0.9rem;
+	}
+	.paste small {
+		color: #78716c;
+		line-height: 1.4;
+	}
+	.paste textarea {
+		font: inherit;
+		font-family: ui-monospace, monospace;
+		font-size: 0.8rem;
+		padding: 0.5rem 0.6rem;
+		border: 1px solid #d6d3d1;
+		border-radius: 8px;
+		width: 100%;
+		resize: vertical;
 	}
 	input[type='url'] {
 		flex: 1;

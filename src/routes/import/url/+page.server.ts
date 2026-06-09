@@ -27,6 +27,30 @@ function toFormValues(recipe: MelaRecipe) {
 	};
 }
 
+function success(method: 'structured' | 'claude', url: string, recipe: MelaRecipe, imageUrl = '') {
+	return {
+		fetched: true as const,
+		method,
+		url,
+		values: { ...toFormValues(recipe), tags: (recipe.categories ?? []).join(', ') },
+		imageUrl
+	};
+}
+
+/** Run extraction over already-obtained HTML: structured data first, then Claude. */
+async function extractFromHtml(html: string, url: string) {
+	const structured = extractJsonLd(html);
+	if (structured) return success('structured', url, structured.recipe, structured.imageUrl ?? '');
+	if (claudeAvailable()) {
+		const recipe = await extractWithClaude(html, url);
+		return success('claude', url, recipe);
+	}
+	return null;
+}
+
+// Statuses that mean the site refused our server (anti-bot / paywall / blocked IP).
+const BLOCK_STATUS = /HTTP (401|402|403|429|451|503)/;
+
 export const actions: Actions = {
 	// Fetch + extract a recipe to pre-fill the editor (no DB write).
 	fetch: async ({ request }) => {
@@ -42,47 +66,64 @@ export const actions: Actions = {
 		try {
 			html = await fetchPage(url);
 		} catch (err) {
-			return fail(502, { url, message: err instanceof Error ? err.message : 'Could not fetch the page.' });
-		}
-
-		if (method === 'auto') {
-			const result = extractJsonLd(html);
-			if (result) {
-				return {
-					fetched: true,
-					method: 'structured' as const,
-					url,
-					values: { ...toFormValues(result.recipe), tags: (result.recipe.categories ?? []).join(', ') },
-					imageUrl: result.imageUrl ?? ''
-				};
-			}
-			// No structured data — offer Claude (if available).
-			return fail(422, {
+			const msg = err instanceof Error ? err.message : 'Could not fetch the page.';
+			const blocked = BLOCK_STATUS.test(msg);
+			return fail(502, {
 				url,
-				noStructuredData: true,
-				claudeAvailable: claudeAvailable(),
-				message: claudeAvailable()
-					? 'No structured recipe data found on this page. Try extracting it with Claude.'
-					: 'No structured recipe data found, and the Claude fallback is not configured.'
+				blocked,
+				message: blocked
+					? "This site refused the import request — its server blocks automated access (you can still open it in your browser). Use “Paste page source” below: open the recipe, view source (⌘/Ctrl+U), copy all, and paste it here."
+					: `Could not fetch the page: ${msg}`
 			});
 		}
 
-		// Claude fallback path.
-		if (!claudeAvailable()) {
-			return fail(422, { url, message: 'The Claude fallback is not configured.' });
+		if (method === 'claude') {
+			if (!claudeAvailable()) return fail(422, { url, message: 'The Claude fallback is not configured.' });
+			try {
+				const recipe = await extractWithClaude(html, url);
+				return success('claude', url, recipe);
+			} catch (err) {
+				return fail(502, { url, message: err instanceof Error ? err.message : 'Claude extraction failed.' });
+			}
 		}
+
+		// Automatic: structured data, then Claude if configured.
 		try {
-			const recipe = await extractWithClaude(html, url);
-			return {
-				fetched: true,
-				method: 'claude' as const,
-				url,
-				values: { ...toFormValues(recipe), tags: (recipe.categories ?? []).join(', ') },
-				imageUrl: ''
-			};
+			const result = await extractFromHtml(html, url);
+			if (result) return result;
 		} catch (err) {
 			return fail(502, { url, message: err instanceof Error ? err.message : 'Claude extraction failed.' });
 		}
+		return fail(422, {
+			url,
+			noStructuredData: true,
+			claudeAvailable: claudeAvailable(),
+			message: 'No structured recipe data found on this page.'
+		});
+	},
+
+	// Extract from page source the user pasted (works even when the site blocks
+	// our server-side fetch — the browser can reach pages our IP cannot).
+	paste: async ({ request }) => {
+		const form = await request.formData();
+		const url = (form.get('url') ?? '').toString().trim();
+		const html = (form.get('html') ?? '').toString();
+
+		if (!html.trim()) return fail(400, { url, pasteMode: true, message: 'Paste the page source first.' });
+
+		try {
+			const result = await extractFromHtml(html, url);
+			if (result) return result;
+		} catch (err) {
+			return fail(502, { url, pasteMode: true, message: err instanceof Error ? err.message : 'Claude extraction failed.' });
+		}
+		return fail(422, {
+			url,
+			pasteMode: true,
+			message: claudeAvailable()
+				? "Couldn't find a recipe in the pasted source. Make sure you copied the full page source (View Source), not just the visible text."
+				: "No structured recipe data found in the pasted source, and the Claude fallback isn't configured."
+		});
 	},
 
 	// Save the reviewed recipe (FR-URL-3: review-then-save, no silent writes).

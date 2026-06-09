@@ -13,9 +13,13 @@ const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 export async function fetchPage(url: string): Promise<string> {
 	const res = await fetch(url, {
 		headers: {
-			'User-Agent': 'Mozilla/5.0 (compatible; RecipeStore/1.0)',
-			Accept: 'text/html,application/xhtml+xml'
+			// Present as a real browser; some sites 403 unknown/bot agents.
+			'User-Agent':
+				'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+			Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+			'Accept-Language': 'en-GB,en;q=0.9'
 		},
+		redirect: 'follow',
 		signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
 	});
 	if (!res.ok) throw new Error(`Could not fetch page (HTTP ${res.status})`);
