@@ -53,4 +53,32 @@ describe('parseInstructions', () => {
 		expect(parseInstructions('')).toEqual([]);
 		expect(parseInstructions('   ')).toEqual([]);
 	});
+
+	it('treats lines starting with # as section headers (blank-line mode)', () => {
+		const items = parseInstructions('# Prep\n\nChop onions.\n\n# Cook\n\nFry until golden.');
+		expect(items.map((i) => i.type)).toEqual(['header', 'step', 'header', 'step']);
+		expect(items[0]).toMatchObject({ type: 'header', text: 'Prep' });
+		expect(items[2]).toMatchObject({ type: 'header', text: 'Cook' });
+		expect(items[1].text).toBe('Chop onions.');
+	});
+
+	it('detects a header even when not blank-separated from its step', () => {
+		const items = parseInstructions('# Prep\nChop onions.\nMince garlic.\n\n# Cook\nFry.');
+		const headers = items.filter((i) => i.type === 'header').map((i) => i.text);
+		expect(headers).toEqual(['Prep', 'Cook']);
+	});
+
+	it('handles headers in single-newline (one step per line) mode', () => {
+		const items = parseInstructions('# Prep\nChop.\n# Cook\nFry.\nServe.');
+		expect(items.map((i) => i.type)).toEqual(['header', 'step', 'header', 'step', 'step']);
+	});
+
+	it('only steps get strikeable keys; headers are not strikeable progress', () => {
+		const items = parseInstructions('# Section\n\nDo a thing.');
+		const step = items.find((i) => i.type === 'step')!;
+		expect(step.key).toBeTruthy();
+		// keys are unique across all items (no keyed-each collisions)
+		const keys = items.map((i) => i.key);
+		expect(new Set(keys).size).toBe(keys.length);
+	});
 });

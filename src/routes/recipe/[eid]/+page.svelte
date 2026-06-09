@@ -95,11 +95,15 @@
 	{#if data.steps.length > 0}
 		<section class="instructions">
 			<h2>Instructions</h2>
-			<ol>
+			<div class="steps">
 				{#each data.steps as step (step.key)}
-					<li>{@html step.html}</li>
+					{#if step.type === 'header'}
+						<h3 class="step-section">{step.text}</h3>
+					{:else}
+						<div class="step">{@html step.html}</div>
+					{/if}
 				{/each}
-			</ol>
+			</div>
 		</section>
 	{/if}
 </div>
@@ -276,13 +280,43 @@
 		border-bottom: none !important;
 	}
 
-	.instructions ol {
-		padding-left: 1.2rem;
+	.steps {
+		counter-reset: step;
 	}
 
-	.instructions li {
+	/* A section header restarts step numbering for the section that follows. */
+	.step-section {
+		counter-reset: step;
+		font-size: 1.05rem;
+		font-weight: 700;
+		margin: 1.25rem 0 0.6rem;
+	}
+
+	.step {
+		counter-increment: step;
+		display: flex;
+		gap: 0.7rem;
 		margin-bottom: 0.9rem;
 		line-height: 1.5;
+	}
+
+	.step::before {
+		content: counter(step);
+		flex: none;
+		width: 1.6rem;
+		height: 1.6rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 50%;
+		background: #f5f5f4;
+		font-size: 0.85rem;
+		font-weight: 700;
+		color: #78716c;
+	}
+
+	.step :global(p) {
+		margin: 0;
 	}
 
 	section :global(a) {
