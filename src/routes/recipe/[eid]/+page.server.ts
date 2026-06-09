@@ -40,8 +40,10 @@ export const load: PageServerLoad = ({ params }) => {
 			html: i.type === 'item' ? renderInline(i.text) : i.text
 		})),
 		steps: parseInstructions(recipe.instructions).map((s) => ({
+			type: s.type,
 			key: s.key,
-			html: renderMarkdown(s.text)
+			text: s.text,
+			html: s.type === 'step' ? renderMarkdown(s.text) : ''
 		})),
 		notesHtml: renderMarkdown(recipe.notes),
 		nutritionHtml: renderMarkdown(recipe.nutrition)

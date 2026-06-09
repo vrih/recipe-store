@@ -8,7 +8,9 @@ export interface IngredientItem {
 }
 
 export interface InstructionStep {
+	type: 'header' | 'step';
 	text: string;
+	/** Stable key for cook_progress (only meaningful for 'step'). */
 	key: string;
 }
 
@@ -45,25 +47,44 @@ export function parseIngredients(raw: string | null | undefined): IngredientItem
 }
 
 /**
- * Parse Mela's single-string `instructions` field into discrete steps, split on
- * blank-line-separated paragraphs (falling back to single newlines when no
- * blank-line separators are present). See PRD §7.7.
+ * Parse Mela's single-string `instructions` field into discrete steps. A line
+ * beginning with `#` is a **section header** (rendered as a heading, not a
+ * numbered step), mirroring ingredient parsing. Steps are blank-line-separated
+ * paragraphs, falling back to one step per line when there are no blank-line
+ * separators. See PRD §7.7.
  */
 export function parseInstructions(raw: string | null | undefined): InstructionStep[] {
 	if (!raw) return [];
-	const text = raw.trim();
-	if (!text) return [];
+	if (!raw.trim()) return [];
 
-	const hasBlankLineSeparators = /\n\s*\n/.test(text);
-	const chunks = hasBlankLineSeparators ? text.split(/\n\s*\n/) : text.split(/\r?\n/);
-
+	const hasBlankLineSeparators = /\n\s*\n/.test(raw);
 	const seen = new Map<string, number>();
-	const steps: InstructionStep[] = [];
-	for (const chunk of chunks) {
-		const step = chunk.trim();
-		if (!step) continue;
-		steps.push({ text: step, key: makeKey('step', step, seen) });
-	}
+	const items: InstructionStep[] = [];
+	let buffer: string[] = [];
 
-	return steps;
+	const flushStep = () => {
+		const text = buffer.join('\n').trim();
+		buffer = [];
+		if (text) items.push({ type: 'step', text, key: makeKey('step', text, seen) });
+	};
+
+	for (const line of raw.split(/\r?\n/)) {
+		const trimmed = line.trim();
+		if (trimmed.startsWith('#')) {
+			flushStep();
+			const text = trimmed.replace(/^#+\s*/, '');
+			if (text) items.push({ type: 'header', text, key: makeKey('step-section', text, seen) });
+		} else if (trimmed === '') {
+			// A blank line ends the current paragraph-step (in blank-line mode).
+			if (hasBlankLineSeparators) flushStep();
+		} else if (hasBlankLineSeparators) {
+			buffer.push(line);
+		} else {
+			// No blank-line separators: each non-empty line is its own step.
+			items.push({ type: 'step', text: trimmed, key: makeKey('step', trimmed, seen) });
+		}
+	}
+	flushStep();
+
+	return items;
 }

@@ -140,16 +140,20 @@
 				<h2>Instructions</h2>
 				<ol class="items steps">
 					{#each data.steps as step (step.key)}
-						<li>
-							<button
-								type="button"
-								class="item"
-								class:struck={done.has(composite('step', step.key))}
-								onclick={() => toggle('step', step.key)}
-							>
-								{@html step.html}
-							</button>
-						</li>
+						{#if step.type === 'header'}
+							<li class="section-header">{step.text}</li>
+						{:else}
+							<li>
+								<button
+									type="button"
+									class="item"
+									class:struck={done.has(composite('step', step.key))}
+									onclick={() => toggle('step', step.key)}
+								>
+									{@html step.html}
+								</button>
+							</li>
+						{/if}
 					{/each}
 				</ol>
 			</section>
@@ -250,6 +254,11 @@
 	}
 
 	.steps {
+		counter-reset: step;
+	}
+
+	/* A section header restarts step numbering for the section that follows. */
+	.steps .section-header {
 		counter-reset: step;
 	}
 
