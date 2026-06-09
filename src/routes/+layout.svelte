@@ -1,20 +1,26 @@
 <script lang="ts">
 	import favicon from '$lib/assets/favicon.svg';
+	import { page } from '$app/state';
 
 	let { children } = $props();
+
+	// Cooking mode is distraction-free: hide global navigation/chrome (FR-COOK-1).
+	const chrome = $derived(!page.url.pathname.endsWith('/cook'));
 </script>
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
 </svelte:head>
 
-<nav>
-	<a href="/" class="brand">Recipe Store</a>
-	<a href="/recipe/new">New</a>
-	<a href="/import">Import</a>
-</nav>
+{#if chrome}
+	<nav>
+		<a href="/" class="brand">Recipe Store</a>
+		<a href="/recipe/new">New</a>
+		<a href="/import">Import</a>
+	</nav>
+{/if}
 
-<main>
+<main class:bare={!chrome}>
 	{@render children()}
 </main>
 
@@ -62,5 +68,9 @@
 		max-width: 1200px;
 		margin: 0 auto;
 		padding: 1.5rem;
+	}
+
+	main.bare {
+		max-width: none;
 	}
 </style>
