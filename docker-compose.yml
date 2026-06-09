@@ -11,6 +11,9 @@ services:
       # Required by adapter-node for CSRF protection on form/upload POSTs.
       # Set to the origin you reach the app on (e.g. your Tailscale hostname).
       - ORIGIN=${ORIGIN:-http://localhost:3000}
+      # Max request body size for uploads. adapter-node defaults to 512K, which
+      # is far too small for a .melarecipes library (often tens/hundreds of MB).
+      - BODY_SIZE_LIMIT=${BODY_SIZE_LIMIT:-1G}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5}
     restart: unless-stopped
