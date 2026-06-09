@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { zipSync, strToU8 } from 'fflate';
 import { runMigrations } from './migrate.js';
-import { importEntries, importUploads } from './import.js';
+import { importEntries, importUploads, importStream } from './import.js';
 import type { ParsedEntry } from './mela.js';
 
 function freshDb(): Database.Database {
@@ -137,5 +137,56 @@ describe('importUploads (streaming)', () => {
 		]);
 		expect(summary.added).toBe(1);
 		expect(summary.skipped).toBe(1);
+	});
+});
+
+describe('importStream (memory-safe streaming)', () => {
+	function recipeBytes(obj: unknown): Uint8Array {
+		return strToU8(JSON.stringify(obj));
+	}
+
+	// Feed a buffer to the importer in small chunks to exercise streaming unzip.
+	async function* inChunks(data: Uint8Array, size = 64): AsyncIterable<Uint8Array> {
+		for (let i = 0; i < data.length; i += size) yield data.subarray(i, i + size);
+	}
+
+	it('streams recipes from an archive fed in small chunks', async () => {
+		const zip = zipSync({
+			'a.melarecipe': recipeBytes({ id: 'x/a', title: 'A', categories: ['Dinner'] }),
+			'b.melarecipe': recipeBytes({ id: 'x/b', title: 'B' }),
+			'__MACOSX/._a.melarecipe': strToU8('AppleDouble junk'),
+			'bad.melarecipe': strToU8('{broken')
+		});
+		const summary = await importStream(db, 'library.melarecipes', inChunks(zip));
+		expect(summary.added).toBe(2);
+		expect(summary.failed).toBe(1); // bad.melarecipe; cruft is skipped, not failed
+		const count = db.prepare('SELECT COUNT(*) c FROM recipes').get() as { c: number };
+		expect(count.c).toBe(2);
+	});
+
+	it('recurses into a nested archive', async () => {
+		const inner = zipSync({ 'n.melarecipe': recipeBytes({ id: 'x/n', title: 'Nested' }) });
+		const outer = zipSync({ 'sub.melarecipes': inner });
+		const summary = await importStream(db, 'outer.melarecipes', inChunks(outer));
+		expect(summary.added).toBe(1);
+		const row = db.prepare('SELECT title FROM recipes WHERE id = ?').get('x/n') as {
+			title: string;
+		};
+		expect(row.title).toBe('Nested');
+	});
+
+	it('imports a single .melarecipe stream', async () => {
+		const summary = await importStream(
+			db,
+			'one.melarecipe',
+			inChunks(recipeBytes({ id: 'x/one', title: 'One' }))
+		);
+		expect(summary.added).toBe(1);
+	});
+
+	it('records a clear failure for a corrupt archive', async () => {
+		const summary = await importStream(db, 'bad.melarecipes', inChunks(strToU8('not a zip at all')));
+		expect(summary.added).toBe(0);
+		expect(summary.failed).toBeGreaterThanOrEqual(1);
 	});
 });

@@ -1,7 +1,8 @@
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
+import { Unzip, UnzipInflate } from 'fflate';
 import type { MelaRecipe, ParsedEntry } from './mela.js';
-import { appleDateToUnixMs, walkUpload } from './mela.js';
+import { appleDateToUnixMs, walkUpload, parseMelaRecipe } from './mela.js';
 import { saveRecipeImages, deleteRecipeImages } from './images.js';
 
 /** Cap on retained failure records so a huge bad import can't itself OOM. */
@@ -197,6 +198,161 @@ export async function importUploads(
 		await walkUpload(upload.name, upload.bytes, (entry) =>
 			importOne(db, entry, conflict, summary)
 		);
+	}
+
+	return summary;
+}
+
+function emptySummary(): ImportSummary {
+	return { added: 0, updated: 0, skipped: 0, failed: 0, failures: [] };
+}
+
+function recordFailure(summary: ImportSummary, source: string, error: string): void {
+	summary.failed++;
+	if (summary.failures.length < MAX_FAILURES) summary.failures.push({ source, error });
+}
+
+function concatChunks(chunks: Uint8Array[]): Uint8Array {
+	let len = 0;
+	for (const c of chunks) len += c.length;
+	const out = new Uint8Array(len);
+	let off = 0;
+	for (const c of chunks) {
+		out.set(c, off);
+		off += c.length;
+	}
+	return out;
+}
+
+function isCruft(name: string): boolean {
+	return name.startsWith('__MACOSX/') || name.endsWith('/.DS_Store') || name === '.DS_Store';
+}
+
+interface PendingEntry {
+	source: string;
+	bytes?: Uint8Array;
+	nested?: Uint8Array;
+	error?: string;
+}
+
+/**
+ * Stream-unzip an archive from a chunk source, importing each recipe as its
+ * entry finishes decompressing. Only one entry's bytes are held at a time, so
+ * memory stays bounded no matter how large the archive is. Nested archives are
+ * buffered and recursed (rare; their size bounds the transient cost).
+ */
+async function importArchiveChunks(
+	db: Database.Database,
+	chunks: AsyncIterable<Uint8Array>,
+	archiveName: string,
+	conflict: ConflictMode,
+	summary: ImportSummary
+): Promise<void> {
+	const unzip = new Unzip();
+	unzip.register(UnzipInflate);
+	const queue: PendingEntry[] = [];
+	let started = 0;
+	let hadError = false;
+
+	unzip.onfile = (file) => {
+		const lower = file.name.toLowerCase();
+		const isArchive = lower.endsWith('.melarecipes') || lower.endsWith('.zip');
+		const isRecipe = lower.endsWith('.melarecipe') || lower.endsWith('.json');
+		const source = `${archiveName}/${file.name}`;
+		// Skip directories, macOS cruft, and non-recipe files: don't call
+		// file.start(), so their data is never decompressed/buffered.
+		if (file.name.endsWith('/') || isCruft(file.name) || (!isArchive && !isRecipe)) return;
+		started++;
+
+		const parts: Uint8Array[] = [];
+		file.ondata = (err, chunk, final) => {
+			if (err) {
+				queue.push({ source, error: err.message });
+				return;
+			}
+			if (chunk && chunk.length) parts.push(chunk);
+			if (final) {
+				const bytes = concatChunks(parts);
+				parts.length = 0;
+				queue.push(isArchive ? { source, nested: bytes } : { source, bytes });
+			}
+		};
+		file.start();
+	};
+
+	const drain = async () => {
+		while (queue.length) {
+			const item = queue.shift()!;
+			if (item.error) {
+				recordFailure(summary, item.source, item.error);
+			} else if (item.nested) {
+				await importArchiveChunks(db, singleChunk(item.nested), item.source, conflict, summary);
+			} else if (item.bytes) {
+				try {
+					const recipe = parseMelaRecipe(item.bytes);
+					await importOne(db, { source: item.source, recipe }, conflict, summary);
+				} catch (err) {
+					recordFailure(summary, item.source, err instanceof Error ? err.message : String(err));
+				}
+			}
+		}
+	};
+
+	try {
+		for await (const chunk of chunks) {
+			unzip.push(chunk, false);
+			await drain();
+		}
+		unzip.push(new Uint8Array(0), true);
+		await drain();
+	} catch (err) {
+		hadError = true;
+		recordFailure(summary, archiveName, `Could not read archive: ${err instanceof Error ? err.message : String(err)}`);
+	}
+
+	// No valid entries and no thrown error usually means the upload wasn't a
+	// readable Mela archive — surface that instead of a silent 0/0/0/0.
+	if (!hadError && started === 0) {
+		recordFailure(summary, archiveName, 'No recipes found — the file may be corrupt or not a Mela archive.');
+	}
+}
+
+async function* singleChunk(data: Uint8Array): AsyncIterable<Uint8Array> {
+	yield data;
+}
+
+/** Read an entire chunk stream into one buffer (for small single-recipe files). */
+async function readAll(chunks: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
+	const parts: Uint8Array[] = [];
+	for await (const c of chunks) parts.push(c instanceof Uint8Array ? c : new Uint8Array(c));
+	return concatChunks(parts);
+}
+
+/**
+ * Import an upload directly from its byte stream (e.g. the request body),
+ * dispatching on the filename. Archives are stream-unzipped one entry at a
+ * time; a single `.melarecipe` is read whole (it's small) and parsed. This is
+ * the memory-safe entry point for the HTTP import endpoint.
+ */
+export async function importStream(
+	db: Database.Database,
+	filename: string,
+	chunks: AsyncIterable<Uint8Array>,
+	conflict: ConflictMode = 'skip'
+): Promise<ImportSummary> {
+	const summary = emptySummary();
+	const lower = filename.toLowerCase();
+
+	if (lower.endsWith('.melarecipes') || lower.endsWith('.zip')) {
+		await importArchiveChunks(db, chunks, filename, conflict, summary);
+	} else {
+		const bytes = await readAll(chunks);
+		try {
+			const recipe = parseMelaRecipe(bytes);
+			await importOne(db, { source: filename, recipe }, conflict, summary);
+		} catch (err) {
+			recordFailure(summary, filename, err instanceof Error ? err.message : String(err));
+		}
 	}
 
 	return summary;
