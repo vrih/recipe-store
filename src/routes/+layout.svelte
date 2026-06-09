@@ -10,6 +10,7 @@
 
 <nav>
 	<a href="/" class="brand">Recipe Store</a>
+	<a href="/recipe/new">New</a>
 	<a href="/import">Import</a>
 </nav>
 

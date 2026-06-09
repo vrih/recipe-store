@@ -1,7 +1,7 @@
 import sharp from 'sharp';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 
 const THUMB_WIDTH = 400;
 
@@ -62,10 +62,48 @@ export function deleteRecipeImages(recipeId: string): void {
 	rmSync(recipeImageDir(recipeId), { recursive: true, force: true });
 }
 
+/** Remove a single stored image (full + thumbnail) given its relative path. */
+export function deleteImageFile(relPath: string): void {
+	rmSync(join(dataDir(), relPath), { force: true });
+	rmSync(join(dataDir(), thumbPathFor(relPath)), { force: true });
+}
+
 /**
- * Decode and persist all base64 images for a recipe, generating a WebP
- * thumbnail for each. Returns the relative paths of successfully saved images,
- * ordered by position. Images that fail to decode/process are skipped.
+ * Persist a single image buffer for a recipe, generating a WebP thumbnail.
+ * The on-disk filename uses a random token so it is independent of ordering
+ * position (which lets images be reordered/deleted without renaming files).
+ * Returns the relative path of the stored original, or null if it can't be
+ * processed as an image.
+ */
+export async function saveImageBuffer(
+	recipeId: string,
+	buf: Buffer
+): Promise<string | null> {
+	if (buf.length === 0) return null;
+	try {
+		const meta = await sharp(buf, { failOn: 'none' }).metadata();
+		const ext = FORMAT_EXT[meta.format ?? ''] ?? 'jpg';
+
+		const dir = recipeImageDir(recipeId);
+		mkdirSync(dir, { recursive: true });
+		const relFull = join('images', recipeDirName(recipeId), `${randomUUID()}.${ext}`);
+		writeFileSync(join(dataDir(), relFull), buf);
+
+		await sharp(buf, { failOn: 'none' })
+			.rotate()
+			.resize({ width: THUMB_WIDTH, withoutEnlargement: true })
+			.webp({ quality: 80 })
+			.toFile(join(dataDir(), thumbPathFor(relFull)));
+
+		return relFull;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Decode and persist all base64 images for a recipe (used by Mela import).
+ * Returns the relative paths of successfully saved images, in order.
  */
 export async function saveRecipeImages(
 	recipeId: string,
@@ -73,36 +111,10 @@ export async function saveRecipeImages(
 ): Promise<SavedImage[]> {
 	if (!base64Images || base64Images.length === 0) return [];
 
-	const dir = recipeImageDir(recipeId);
-	mkdirSync(dir, { recursive: true });
-	const dirName = recipeDirName(recipeId);
 	const saved: SavedImage[] = [];
-
-	for (let i = 0; i < base64Images.length; i++) {
-		try {
-			const buf = decodeBase64Image(base64Images[i]);
-			if (buf.length === 0) continue;
-
-			const image = sharp(buf, { failOn: 'none' });
-			const meta = await image.metadata();
-			const ext = FORMAT_EXT[meta.format ?? ''] ?? 'jpg';
-
-			const relFull = join('images', dirName, `${i}.${ext}`);
-			writeFileSync(join(dataDir(), relFull), buf);
-
-			const relThumb = thumbPathFor(relFull);
-			await sharp(buf, { failOn: 'none' })
-				.rotate()
-				.resize({ width: THUMB_WIDTH, withoutEnlargement: true })
-				.webp({ quality: 80 })
-				.toFile(join(dataDir(), relThumb));
-
-			saved.push({ path: relFull });
-		} catch {
-			// Skip individual images that cannot be processed.
-			continue;
-		}
+	for (const raw of base64Images) {
+		const path = await saveImageBuffer(recipeId, decodeBase64Image(raw));
+		if (path) saved.push({ path });
 	}
-
 	return saved;
 }
