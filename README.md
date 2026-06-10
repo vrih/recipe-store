@@ -22,6 +22,10 @@ Mela is lovely, but your recipes shouldn't be trapped in one app. Recipe Store i
 
 👩‍🍳 **Has a cooking mode** — distraction-free, big text, keeps the screen awake, and lets you tap ingredients and steps to strike them through. Your progress is saved per recipe, so you can wander off to answer the door and come back to exactly where you were.
 
+⏱️ **Times your steps** — cooking mode spots durations in the method ("fry for 1–2 minutes", "bake 1 hour 30 minutes") and turns them into one-tap timers. You can also start an arbitrary timer or save **quick-timer favourites** for sides that aren't in the method (rice 14 min, pasta 9 min) — favourites are shared across every device in the house. Run several at once; they keep correct time even if the tab is backgrounded, survive a reload, and ping you with a notification (plus a beep and a buzz) when they're done. Ranges ring at the lower bound so you can check the food early.
+
+📲 **Installs as an app** — it's a PWA, so you can add it to a phone or tablet home screen and run it full-screen, with the app shell cached for a quick launch. Timer notifications work best once installed (on iOS, adding to the Home Screen is required for notifications to fire).
+
 🌐 **Imports from the web** — paste a recipe URL and it reads the page's structured data (with a Claude-powered fallback for messy pages). If a site blocks automated access, paste the page source and it'll read the recipe straight out of that.
 
 💾 **Backs itself up** — nightly online SQLite backups (keeping the last 14), plus a "back up now" button, all inside the data volume your NAS snapshots already cover.
@@ -54,6 +58,8 @@ npm run check      # type-check
 ```
 
 The data lives under `./data` (SQLite DB + images + backups) — gitignored, and the single thing worth backing up.
+
+The PWA icons in `static/icons/` are generated from `src/lib/assets/favicon.svg`. If you change the logo, regenerate and commit them with `node scripts/gen-icons.mjs`. The service worker (`src/service-worker.ts`) only runs in a production build — test PWA install/offline behaviour with `npm run build && npm run preview`, not `npm run dev`.
 
 ## Status & design
 
