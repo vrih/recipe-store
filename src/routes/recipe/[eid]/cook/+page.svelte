@@ -1,8 +1,20 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
+	import { detectTimes } from '$lib/times';
+	import TimerChip from '$lib/components/TimerChip.svelte';
+	import TimerTray from '$lib/components/TimerTray.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+
+	// Detect cookable durations in each step once, keyed by the step's stable key.
+	const stepTimes = $derived.by(() => {
+		const map = new Map<string, ReturnType<typeof detectTimes>>();
+		for (const step of data.steps) {
+			if (step.type === 'step') map.set(step.key, detectTimes(step.text));
+		}
+		return map;
+	});
 
 	// Persisted progress comes from the server (data.done). Local toggles are
 	// overlaid on top so the set is correct during SSR and after invalidation.
@@ -152,6 +164,13 @@
 								>
 									{@html step.html}
 								</button>
+								{#if (stepTimes.get(step.key)?.length ?? 0) > 0}
+									<div class="timers">
+										{#each stepTimes.get(step.key) ?? [] as match (match.start)}
+											<TimerChip {match} stepKey={step.key} recipeEid={data.eid} />
+										{/each}
+									</div>
+								{/if}
 							</li>
 						{/if}
 					{/each}
@@ -159,6 +178,8 @@
 			</section>
 		{/if}
 	</div>
+
+	<TimerTray recipeEid={data.eid} favorites={data.favorites} />
 </div>
 
 <style>
@@ -333,6 +354,13 @@
 		background: #fafaf9;
 		text-decoration: line-through;
 		text-decoration-color: #a8a29e;
+	}
+
+	.timers {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		margin: 0.4rem 0 0.2rem 2.2rem;
 	}
 
 	.section-header {
