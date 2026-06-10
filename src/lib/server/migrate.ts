@@ -79,6 +79,20 @@ const MIGRATIONS = [
         VALUES ('delete', old.rowid, old.title, old.text, old.ingredients, old.instructions);
       END;
     `
+	},
+	{
+		name: '002_timer_favorites',
+		up: `
+      -- Household-wide quick-start timer presets (e.g. Rice 14m, Pasta 9m).
+      -- Not tied to a recipe; shared across every device.
+      CREATE TABLE timer_favorites (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        label      TEXT NOT NULL,
+        seconds    INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        UNIQUE (label, seconds)
+      );
+    `
 	}
 ] as const;
 

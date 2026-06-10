@@ -179,7 +179,7 @@
 		{/if}
 	</div>
 
-	<TimerTray recipeEid={data.eid} />
+	<TimerTray recipeEid={data.eid} favorites={data.favorites} />
 </div>
 
 <style>
