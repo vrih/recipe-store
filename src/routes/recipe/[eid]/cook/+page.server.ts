@@ -5,6 +5,7 @@ import { getRecipe } from '$lib/server/recipes';
 import { parseIngredients, parseInstructions } from '$lib/server/parse';
 import { renderInline, renderMarkdown } from '$lib/server/markdown';
 import { getProgress } from '$lib/server/progress';
+import { listFavorites } from '$lib/server/timerFavorites';
 import { decodeId } from '$lib/ids';
 
 export const load: PageServerLoad = ({ params }) => {
@@ -34,6 +35,7 @@ export const load: PageServerLoad = ({ params }) => {
 			text: s.text,
 			html: s.type === 'step' ? renderMarkdown(s.text) : ''
 		})),
-		done: getProgress(db, id)
+		done: getProgress(db, id),
+		favorites: listFavorites(db)
 	};
 };
