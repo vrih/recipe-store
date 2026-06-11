@@ -37,6 +37,7 @@ export const load: PageServerLoad = ({ params }) => {
 		ingredients: parseIngredients(recipe.ingredients).map((i) => ({
 			type: i.type,
 			key: i.key,
+			text: i.text,
 			html: i.type === 'item' ? renderInline(i.text) : i.text
 		})),
 		steps: parseInstructions(recipe.instructions).map((s) => ({

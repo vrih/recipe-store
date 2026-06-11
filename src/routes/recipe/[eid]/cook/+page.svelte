@@ -5,9 +5,21 @@
 	import TimerChip from '$lib/components/TimerChip.svelte';
 	import { timers } from '$lib/timerStore.svelte';
 	import { formatClock } from '$lib/times';
+	import { scaleIngredient } from '$lib/scaleIngredient';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+
+	// Servings stepper
+	let servingsOverride = $state<number | null>(null);
+	let currentServings = $derived(servingsOverride ?? data.baseServings ?? null);
+	const scale = $derived(
+		data.baseServings && currentServings ? currentServings / data.baseServings : 1
+	);
+	function adjServings(d: number) {
+		const base = currentServings ?? 1;
+		servingsOverride = Math.max(1, Math.min(50, base + d));
+	}
 
 	// Detect cookable durations in each step once.
 	const stepTimes = $derived.by(() => {
@@ -122,6 +134,16 @@
 				<span class="cook-title">{data.title || 'Untitled'}</span>
 			</div>
 			<div class="header-right">
+				{#if data.baseServings !== null}
+					<div class="servings-stepper">
+						<button type="button" class="step-btn" onclick={() => adjServings(-1)} aria-label="Fewer servings">−</button>
+						<span class="servings-val" title="Servings">{currentServings ?? data.baseServings}</span>
+						<button type="button" class="step-btn" onclick={() => adjServings(1)} aria-label="More servings">+</button>
+						{#if scale !== 1}
+							<span class="scale-badge">×{scale % 1 === 0 ? scale : scale.toFixed(1)}</span>
+						{/if}
+					</div>
+				{/if}
 				<button type="button" class="reset-btn" onclick={reset}>Reset</button>
 				<a class="exit-btn" href="/recipe/{data.eid}">Exit</a>
 			</div>
@@ -191,7 +213,11 @@
 									onclick={() => toggle('ingredient', item.key)}
 								>
 									<span class="item-check">{done.has(composite('ingredient', item.key)) ? '✓' : ''}</span>
+									{#if scale !== 1}
+									<span>{scaleIngredient(item.text, scale)}</span>
+								{:else}
 									<span>{@html item.html}</span>
+								{/if}
 								</button>
 							</li>
 						{/if}
@@ -303,6 +329,53 @@
 		gap: 0.5rem;
 		align-items: center;
 		flex-shrink: 0;
+	}
+
+	/* Servings stepper in cook header */
+	.servings-stepper {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		background: #f6f1e9;
+		border: 1px solid #e4dbcc;
+		border-radius: 10px;
+		padding: 0.25rem 0.5rem;
+	}
+
+	.servings-stepper .step-btn {
+		width: 24px;
+		height: 24px;
+		min-height: unset;
+		border-radius: 6px;
+		border: none;
+		background: transparent;
+		color: #6e665c;
+		font: inherit;
+		font-size: 1rem;
+		line-height: 1;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: background 0.1s;
+	}
+	.servings-stepper .step-btn:hover { background: #ede4d6; }
+
+	.servings-val {
+		font-size: 0.9rem;
+		font-weight: 700;
+		min-width: 1.25rem;
+		text-align: center;
+		color: #2b2723;
+	}
+
+	.scale-badge {
+		font-size: 0.72rem;
+		font-weight: 700;
+		color: #c0644a;
+		background: #f4e8e0;
+		padding: 0.1rem 0.4rem;
+		border-radius: 99px;
 	}
 
 	.reset-btn {

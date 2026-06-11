@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import { detectTimes } from '$lib/times';
+	import { scaleIngredient } from '$lib/scaleIngredient';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -142,12 +143,6 @@
 		</div>
 	{/if}
 
-	{#if scale !== 1}
-		<div class="scale-notice">
-			Multiply quantities by <strong>×{scale % 1 === 0 ? scale : scale.toFixed(1)}</strong> for {currentServings} serving{currentServings !== 1 ? 's' : ''}.
-		</div>
-	{/if}
-
 	<div class="columns">
 		{#if data.ingredients.length > 0}
 			<section class="ingredients-col">
@@ -156,6 +151,8 @@
 					{#each data.ingredients as item (item.key || item.html)}
 						{#if item.type === 'header'}
 							<li class="section-header">{item.html}</li>
+						{:else if scale !== 1}
+							<li>{scaleIngredient(item.text, scale)}</li>
 						{:else}
 							<li>{@html item.html}</li>
 						{/if}
@@ -430,15 +427,6 @@
 		padding: 0.15rem 0.5rem;
 		border-radius: 99px;
 		display: inline-block;
-	}
-	.scale-notice {
-		background: #f4e8e0;
-		border: 1px solid #e7c4b6;
-		border-radius: 10px;
-		padding: 0.65rem 1rem;
-		font-size: 0.88rem;
-		color: #7a4534;
-		margin-bottom: 1.25rem;
 	}
 
 	/* Two-col layout */
