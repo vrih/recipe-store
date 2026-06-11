@@ -1,7 +1,8 @@
-import type { PageServerLoad } from './$types';
+import { fail } from '@sveltejs/kit';
+import type { PageServerLoad, Actions } from './$types';
 import db from '$lib/server/db';
-import { searchRecipeCards, listTags, type SortKey } from '$lib/server/recipes';
-import { encodeId } from '$lib/ids';
+import { searchRecipeCards, listTags, setFavorite, type SortKey } from '$lib/server/recipes';
+import { encodeId, decodeId } from '$lib/ids';
 import { imageUrl } from '$lib/paths';
 
 const SORTS: SortKey[] = ['created', 'updated', 'title'];
@@ -29,4 +30,21 @@ export const load: PageServerLoad = ({ url }) => {
 		tags: listTags(db),
 		filters: { q, activeTags, favorite, wantToCook, sort }
 	};
+};
+
+export const actions: Actions = {
+	toggleFavorite: async ({ request }) => {
+		const form = await request.formData();
+		const eid = form.get('eid') as string;
+		const favorite = form.get('favorite') === 'true';
+		let id: string;
+		try {
+			id = decodeId(eid);
+		} catch {
+			return fail(404, { message: 'Recipe not found' });
+		}
+		const result = setFavorite(db, id, favorite);
+		if (result === null) return fail(404, { message: 'Recipe not found' });
+		return { eid, favorite: result };
+	}
 };

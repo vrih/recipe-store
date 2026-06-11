@@ -179,9 +179,9 @@
 		bottom: 0;
 		margin-top: 2rem;
 		background: #fff;
-		border: 1px solid #e7e5e4;
+		border: 1px solid #e9e1d4;
 		border-radius: 12px 12px 0 0;
-		box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.06);
+		box-shadow: 0 -4px 16px rgba(120, 80, 50, 0.08);
 		padding: 0.75rem 1rem 1rem;
 		z-index: 20;
 	}
@@ -203,7 +203,7 @@
 		font-size: 0.85rem;
 		background: none;
 		border: none;
-		color: #b45309;
+		color: #c0644a;
 		cursor: pointer;
 		padding: 0;
 	}
@@ -231,8 +231,8 @@
 	}
 
 	.active li.done {
-		background: #ecfdf5;
-		border-color: #a7f3d0;
+		background: #f4e8e0;
+		border-color: #e7c4b6;
 	}
 
 	.time {
@@ -381,7 +381,7 @@
 		padding: 0.45rem 1rem;
 		border: none;
 		border-radius: 8px;
-		background: #b45309;
+		background: #c0644a;
 		color: #fff;
 		cursor: pointer;
 	}

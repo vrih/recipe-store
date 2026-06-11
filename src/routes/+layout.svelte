@@ -4,7 +4,6 @@
 
 	let { children } = $props();
 
-	// Cooking mode is distraction-free: hide global navigation/chrome (FR-COOK-1).
 	const chrome = $derived(!page.url.pathname.endsWith('/cook'));
 </script>
 
@@ -14,10 +13,12 @@
 
 {#if chrome}
 	<nav>
-		<a href="/" class="brand">Recipe Store</a>
-		<a href="/recipe/new">New</a>
-		<a href="/import">Import</a>
-		<a href="/settings">Settings</a>
+		<a href="/" class="brand">Hearth</a>
+		<div class="nav-links">
+			<a href="/recipe/new">New</a>
+			<a href="/import">Import</a>
+			<a href="/settings">Settings</a>
+		</div>
 	</nav>
 {/if}
 
@@ -32,38 +33,65 @@
 
 	:global(body) {
 		margin: 0;
-		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-		background: #fafaf9;
-		color: #1c1917;
+		font-family: 'Hanken Grotesk', system-ui, -apple-system, sans-serif;
+		-webkit-font-smoothing: antialiased;
+		background: #f6f1e9;
+		color: #2b2723;
+	}
+
+	:global(::-webkit-scrollbar) {
+		width: 8px;
+		height: 8px;
+	}
+	:global(::-webkit-scrollbar-thumb) {
+		background: #d9cdba;
+		border-radius: 99px;
+		border: 2px solid transparent;
+		background-clip: padding-box;
 	}
 
 	nav {
-		padding: 0.75rem 1.5rem;
-		border-bottom: 1px solid #e7e5e4;
-		background: #fff;
+		padding: 0 1.75rem;
+		height: 60px;
+		border-bottom: 1px solid #e9e1d4;
+		background: rgba(246, 241, 233, 0.9);
+		backdrop-filter: blur(10px);
 		position: sticky;
 		top: 0;
-		z-index: 10;
+		z-index: 20;
 		display: flex;
-		align-items: baseline;
+		align-items: center;
+		justify-content: space-between;
 		gap: 1.5rem;
-		flex-wrap: wrap;
 	}
 
 	.brand {
-		font-weight: 700;
-		font-size: 1.1rem;
-		letter-spacing: -0.01em;
+		font-weight: 800;
+		font-size: 1.2rem;
+		letter-spacing: -0.03em;
+		text-decoration: none;
+		color: #2b2723;
 	}
 
-	nav a {
-		text-decoration: none;
-		color: inherit;
+	.nav-links {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
 	}
 
 	nav a:not(.brand) {
-		color: #57534e;
-		font-size: 0.95rem;
+		text-decoration: none;
+		color: #6e665c;
+		font-size: 0.9rem;
+		font-weight: 600;
+		padding: 0.4rem 0.75rem;
+		border-radius: 8px;
+		transition: background 0.12s ease, color 0.12s ease;
+	}
+
+	nav a:not(.brand):hover {
+		background: #ede4d6;
+		color: #2b2723;
 	}
 
 	main {
@@ -74,12 +102,12 @@
 
 	main.bare {
 		max-width: none;
+		padding: 0;
 	}
 
-	/* Larger touch targets for phones and kitchen tablets. */
 	@media (max-width: 820px) {
-		nav a:not(.brand) {
-			padding: 0.35rem 0;
+		nav {
+			padding: 0 1rem;
 		}
 
 		:global(button),

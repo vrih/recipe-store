@@ -22,17 +22,19 @@
 		gap: 0.35rem;
 		font: inherit;
 		font-size: 0.9rem;
-		padding: 0.3rem 0.7rem;
-		border: 1px solid #fed7aa;
+		font-weight: 600;
+		padding: 0.4rem 0.9rem;
+		border: 1px solid #e7c4b6;
 		border-radius: 999px;
-		background: #fff7ed;
-		color: #9a3412;
+		background: #fff;
+		color: #c0644a;
 		cursor: pointer;
 		line-height: 1.2;
+		white-space: nowrap;
 	}
 
 	.chip:hover {
-		background: #ffedd5;
+		background: #f4e8e0;
 	}
 
 	.chip:active {
