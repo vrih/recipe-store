@@ -3,7 +3,7 @@
 	import { formatClock, formatDuration } from '$lib/times';
 	import type { TimerFavorite } from '$lib/server/timerFavorites';
 
-	let { recipeEid, favorites = [] }: { recipeEid: string; favorites?: TimerFavorite[] } = $props();
+	let { recipeEid, favorites = [], showRunning = true }: { recipeEid: string; favorites?: TimerFavorite[]; showRunning?: boolean } = $props();
 
 	const list = $derived(timers.forRecipe(recipeEid));
 	const hasDone = $derived(list.some((t) => t.status === 'done'));
@@ -71,7 +71,7 @@
 </script>
 
 <div class="tray" role="region" aria-label="Kitchen timers">
-	{#if list.length > 0}
+	{#if showRunning && list.length > 0}
 		<div class="tray-head">
 			<strong>Timers</strong>
 			{#if timers.permission === 'default'}
