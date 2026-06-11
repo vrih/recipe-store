@@ -24,9 +24,11 @@ export const load: PageServerLoad = ({ params }) => {
 		title: recipe.title,
 		yield: recipe.yield,
 		totalTime: recipe.total_time,
+		baseServings: (() => { const m = recipe.yield?.match(/\d+/); return m ? parseInt(m[0], 10) : null; })(),
 		ingredients: parseIngredients(recipe.ingredients).map((i) => ({
 			type: i.type,
 			key: i.key,
+			text: i.text,
 			html: i.type === 'item' ? renderInline(i.text) : i.text
 		})),
 		steps: parseInstructions(recipe.instructions).map((s) => ({
