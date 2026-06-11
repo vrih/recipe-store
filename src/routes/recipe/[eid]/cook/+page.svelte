@@ -271,7 +271,7 @@
 	</div>
 
 	<!-- Full timer management tray (favorites, custom timers) -->
-	<TimerTray recipeEid={data.eid} favorites={data.favorites} />
+	<TimerTray recipeEid={data.eid} favorites={data.favorites} showRunning={false} />
 </div>
 
 <style>
