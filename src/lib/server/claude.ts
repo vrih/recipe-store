@@ -52,7 +52,9 @@ const SYSTEM_PROMPT =
 	'return it as structured JSON. Use only information present on the page. Leave ' +
 	'a field as an empty string (or empty array for categories) if it is not present. ' +
 	'For ingredients, put one ingredient per line. For instructions, separate steps ' +
-	'with blank lines. Do not invent quantities, steps, or nutrition values.';
+	'with blank lines. Do not prefix new lines with a number. Temperatures should only ' +
+        'be presented in Celcius. If metric and imperial weights are both provided then ' +
+        'just use the metric. Do not invent quantities, steps, or nutrition values.';
 
 /**
  * Use Claude to extract a recipe from page content when structured data is
