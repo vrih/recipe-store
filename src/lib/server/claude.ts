@@ -161,10 +161,15 @@ const CLEANUP_SCHEMA = {
 const CLEANUP_SYSTEM_PROMPT =
 	'You tidy up a recipe\'s text for readability without changing its meaning. Fix broken ' +
 	'formatting, stray HTML entities, mangled characters, and inconsistent spacing or line breaks. ' +
-	'Keep the ingredient list and instructions the same in substance — do not invent, remove, ' +
-	'reorder, merge, or split steps or ingredients, and do not change quantities, units, or ' +
-	'temperatures. One ingredient per line; blank line between instruction steps; no numbering ' +
-	'prefixes. Preserve the original language. If a field is already clean, return it unchanged.';
+	'Keep the ingredient list and instructions the same in substance — do not invent, reorder, ' +
+	'merge, or split steps or ingredients, and do not change quantities, units, or temperatures. ' +
+	'You may remove information a competent cook would not need — filler commentary, backstory, ' +
+	'marketing copy, or restated obvious technique — but never remove an actual ingredient, ' +
+	'quantity, or instruction step. One ingredient per line; blank line between instruction steps; ' +
+	'no numbering prefixes. Preserve the original language. If a field is already clean, return it ' +
+	'unchanged. Precede section headings with a `#`. Where a quantity, unit, or temperature is ' +
+	'given in both metric and imperial, keep only the metric. Make instructions direct — avoid ' +
+	'flowery language or excessive detail.';
 
 /**
  * Ask Claude to tidy up a recipe's text fields. Returns a cleaned copy —
