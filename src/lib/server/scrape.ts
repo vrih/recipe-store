@@ -71,6 +71,69 @@ function findRecipeNode(html: string): JsonObject | null {
 	return null;
 }
 
+/** All image URLs referenced by a schema.org `image` value (string, array, or ImageObject(s)). */
+function collectAllImageUrls(v: unknown): string[] {
+	const out: string[] = [];
+	const add = (item: unknown) => {
+		if (typeof item === 'string') {
+			if (item) out.push(item);
+		} else if (item && typeof item === 'object') {
+			const url = (item as JsonObject).url;
+			if (typeof url === 'string' && url) out.push(url);
+		}
+	};
+	if (Array.isArray(v)) v.forEach(add);
+	else add(v);
+	return out;
+}
+
+/** Pull og:image / twitter:image URLs out of a page's <meta> tags. */
+function extractMetaImages(html: string): string[] {
+	const out: string[] = [];
+	const IMAGE_META = new Set([
+		'og:image',
+		'og:image:url',
+		'og:image:secure_url',
+		'twitter:image',
+		'twitter:image:src'
+	]);
+	for (const m of html.matchAll(/<meta\b[^>]*>/gi)) {
+		const tag = m[0];
+		const propMatch = tag.match(/(?:property|name)\s*=\s*["']([^"']+)["']/i);
+		const contentMatch = tag.match(/content\s*=\s*["']([^"']+)["']/i);
+		if (!propMatch || !contentMatch) continue;
+		if (IMAGE_META.has(propMatch[1].toLowerCase())) out.push(contentMatch[1]);
+	}
+	return out;
+}
+
+function resolveUrl(u: string, base: string): string | null {
+	try {
+		return new URL(u, base).href;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Collect candidate hero/lead images for a page: the schema.org Recipe's
+ * `image` value(s) first (if present), then og:image/twitter:image meta
+ * tags, resolved against `baseUrl` and de-duplicated.
+ */
+export function extractImageCandidates(html: string, baseUrl: string): string[] {
+	const node = findRecipeNode(html);
+	const raw: string[] = [];
+	if (node) raw.push(...collectAllImageUrls(node.image));
+	raw.push(...extractMetaImages(html));
+
+	const out: string[] = [];
+	for (const u of raw) {
+		const resolved = resolveUrl(u, baseUrl);
+		if (resolved && !out.includes(resolved)) out.push(resolved);
+	}
+	return out.slice(0, 8);
+}
+
 function isRecipeType(node: JsonObject): boolean {
 	const t = node['@type'];
 	if (typeof t === 'string') return t.toLowerCase() === 'recipe';

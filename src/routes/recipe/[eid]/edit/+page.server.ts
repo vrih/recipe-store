@@ -9,6 +9,7 @@ import {
 	ConflictError,
 	NotFoundError
 } from '$lib/server/edit';
+import { cleanupRecipe, claudeAvailable, pickCleanupFields } from '$lib/server/claude';
 import { decodeId } from '$lib/ids';
 import { imageUrl } from '$lib/paths';
 
@@ -27,6 +28,7 @@ export const load: PageServerLoad = ({ params }) => {
 
 	return {
 		eid: params.eid,
+		claudeAvailable: claudeAvailable(),
 		recipe: {
 			title: recipe.title,
 			text: recipe.text,
@@ -80,5 +82,20 @@ export const actions: Actions = {
 		const id = resolveId(params.eid);
 		deleteRecipe(db, id);
 		throw redirect(303, '/');
+	},
+
+	// Ask Claude to tidy up the currently-entered text fields (no DB write).
+	cleanup: async ({ request }) => {
+		if (!claudeAvailable()) return fail(422, { message: 'Claude is not configured.' });
+
+		const form = await request.formData();
+		const input = recipeInputFromForm(form);
+
+		try {
+			const cleaned = await cleanupRecipe(pickCleanupFields(input));
+			return { cleanupResult: true as const, original: pickCleanupFields(input), cleaned };
+		} catch (err) {
+			return fail(502, { message: err instanceof Error ? err.message : 'Claude cleanup failed.' });
+		}
 	}
 };
