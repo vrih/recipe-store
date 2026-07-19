@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import RecipeForm from '$lib/components/RecipeForm.svelte';
+	import RecipeCompare from '$lib/components/RecipeCompare.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -18,6 +19,24 @@
 	$effect(() => {
 		if (blocked) showPaste = true;
 	});
+
+	// Which version (original vs Claude-cleaned) is currently used to seed the editable form.
+	let versionChoice = $state<'original' | 'cleaned'>('original');
+	$effect(() => {
+		if (fetched) versionChoice = fetched.cleaned ? 'cleaned' : 'original';
+	});
+
+	// Which candidate images the user wants imported (hero image pre-selected).
+	let selectedImages = $state<string[]>([]);
+	$effect(() => {
+		selectedImages = fetched && fetched.imageUrls.length > 0 ? [fetched.imageUrls[0]] : [];
+	});
+
+	function toggleImage(imgUrl: string, checked: boolean) {
+		selectedImages = checked
+			? [...selectedImages, imgUrl]
+			: selectedImages.filter((u) => u !== imgUrl);
+	}
 </script>
 
 <svelte:head>
@@ -113,13 +132,47 @@
 			Extracted via <strong>{fetched.method === 'claude' ? 'Claude' : 'structured data'}</strong>.
 			Review and edit before saving.
 		</p>
+
+		{#if fetched.cleaned}
+			<h2 class="section-title">Claude cleanup</h2>
+			<p class="hint">Compare the original extraction with a Claude-tidied version, and pick which one to start editing from.</p>
+			<RecipeCompare
+				leftLabel="Original"
+				rightLabel="Claude cleaned up"
+				left={fetched.values}
+				right={fetched.cleaned.values}
+				active={versionChoice === 'cleaned' ? 'right' : 'left'}
+				onChoose={(side) => (versionChoice = side === 'right' ? 'cleaned' : 'original')}
+			/>
+		{/if}
+
 		<form method="POST" action="?/create">
-			<input type="hidden" name="link" value={fetched.url} />
-			<input type="hidden" name="imageUrl" value={fetched.imageUrl} />
-			<RecipeForm recipe={fetched.values} tags={fetched.values.tags} />
-			{#if fetched.imageUrl}
-				<p class="hint">Lead image will be downloaded and attached on save.</p>
+			{#if fetched.imageUrls.length > 0}
+				<fieldset class="images-pick">
+					<legend>Images to import</legend>
+					<div class="image-candidates">
+						{#each fetched.imageUrls as imgUrl (imgUrl)}
+							<label class="candidate">
+								<input
+									type="checkbox"
+									name="selectedImages"
+									value={imgUrl}
+									checked={selectedImages.includes(imgUrl)}
+									onchange={(e) => toggleImage(imgUrl, e.currentTarget.checked)}
+								/>
+								<img src={imgUrl} alt="" loading="lazy" />
+							</label>
+						{/each}
+					</div>
+					<p class="hint">Selected images will be downloaded and attached on save.</p>
+				</fieldset>
 			{/if}
+			{#key versionChoice}
+				<RecipeForm
+					recipe={versionChoice === 'cleaned' && fetched.cleaned ? fetched.cleaned.values : fetched.values}
+					tags={fetched.tags}
+				/>
+			{/key}
 			<div class="actions">
 				<button type="submit">Save recipe</button>
 				<a href="/import/url">Start over</a>
@@ -240,5 +293,41 @@
 	.hint {
 		color: #a8a29e;
 		font-size: 0.9rem;
+	}
+	.section-title {
+		margin: 1.5rem 0 0.25rem;
+		font-size: 1.05rem;
+	}
+	.images-pick {
+		border: 1px solid #e7e5e4;
+		border-radius: 10px;
+		padding: 0.85rem 1rem;
+		margin: 0 0 1.25rem;
+		max-width: 760px;
+	}
+	.images-pick legend {
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: #44403c;
+		padding: 0 0.3rem;
+	}
+	.image-candidates {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+	}
+	.candidate {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.3rem;
+		cursor: pointer;
+	}
+	.candidate img {
+		width: 120px;
+		height: 90px;
+		object-fit: cover;
+		border-radius: 8px;
+		border: 1px solid #e7e5e4;
 	}
 </style>

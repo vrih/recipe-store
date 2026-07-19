@@ -1,15 +1,15 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import db from '$lib/server/db';
-import { fetchPage, extractJsonLd, downloadImage } from '$lib/server/scrape';
-import { extractWithClaude, claudeAvailable } from '$lib/server/claude';
+import { fetchPage, extractJsonLd, downloadImage, extractImageCandidates } from '$lib/server/scrape';
+import { extractWithClaude, cleanupRecipe, claudeAvailable, pickCleanupFields } from '$lib/server/claude';
 import { createRecipe, addRecipeImages, recipeInputFromForm } from '$lib/server/edit';
 import type { MelaRecipe } from '$lib/server/mela';
 import { encodeId } from '$lib/ids';
 
 export const load: PageServerLoad = () => ({ claudeAvailable: claudeAvailable() });
 
-function toFormValues(recipe: MelaRecipe) {
+function toFormValues(recipe: MelaRecipe, url: string) {
 	return {
 		title: recipe.title ?? '',
 		text: recipe.text ?? '',
@@ -21,31 +21,60 @@ function toFormValues(recipe: MelaRecipe) {
 		instructions: recipe.instructions ?? '',
 		notes: recipe.notes ?? '',
 		nutrition: recipe.nutrition ?? '',
-		link: '',
+		link: url,
 		favorite: false,
 		wantToCook: false
 	};
 }
 
-function success(method: 'structured' | 'claude', url: string, recipe: MelaRecipe, imageUrl = '') {
+/** Build the fetch-action response: original values plus, if Claude is configured, a cleaned-up alternative. */
+async function buildResult(
+	method: 'structured' | 'claude',
+	url: string,
+	recipe: MelaRecipe,
+	imageUrls: string[]
+) {
+	const values = toFormValues(recipe, url);
+	let cleaned: { values: ReturnType<typeof toFormValues> } | null = null;
+	if (claudeAvailable()) {
+		try {
+			const cleanedFields = await cleanupRecipe(pickCleanupFields(recipe));
+			cleaned = { values: { ...values, ...cleanedFields } };
+		} catch {
+			// Best-effort: cleanup failing shouldn't block the import.
+			cleaned = null;
+		}
+	}
 	return {
 		fetched: true as const,
 		method,
 		url,
-		values: { ...toFormValues(recipe), tags: (recipe.categories ?? []).join(', ') },
-		imageUrl
+		values,
+		tags: (recipe.categories ?? []).join(', '),
+		cleaned,
+		imageUrls
 	};
 }
 
 /** Run extraction over already-obtained HTML: structured data first, then Claude. */
-async function extractFromHtml(html: string, url: string) {
+async function extractRecipe(
+	html: string,
+	url: string
+): Promise<{ method: 'structured' | 'claude'; recipe: MelaRecipe } | null> {
 	const structured = extractJsonLd(html);
-	if (structured) return success('structured', url, structured.recipe, structured.imageUrl ?? '');
+	if (structured) return { method: 'structured', recipe: structured.recipe };
 	if (claudeAvailable()) {
 		const recipe = await extractWithClaude(html, url);
-		return success('claude', url, recipe);
+		return { method: 'claude', recipe };
 	}
 	return null;
+}
+
+async function extractFromHtml(html: string, url: string) {
+	const extracted = await extractRecipe(html, url);
+	if (!extracted) return null;
+	const imageUrls = extractImageCandidates(html, url);
+	return buildResult(extracted.method, url, extracted.recipe, imageUrls);
 }
 
 // Statuses that mean the site refused our server (anti-bot / paywall / blocked IP).
@@ -81,7 +110,8 @@ export const actions: Actions = {
 			if (!claudeAvailable()) return fail(422, { url, message: 'The Claude fallback is not configured.' });
 			try {
 				const recipe = await extractWithClaude(html, url);
-				return success('claude', url, recipe);
+				const imageUrls = extractImageCandidates(html, url);
+				return await buildResult('claude', url, recipe, imageUrls);
 			} catch (err) {
 				return fail(502, { url, message: err instanceof Error ? err.message : 'Claude extraction failed.' });
 			}
@@ -130,18 +160,23 @@ export const actions: Actions = {
 	create: async ({ request }) => {
 		const form = await request.formData();
 		const input = recipeInputFromForm(form);
-		const sourceUrl = (form.get('link') ?? '').toString().trim();
-		const imageUrl = (form.get('imageUrl') ?? '').toString().trim();
-		input.link = sourceUrl;
+		const selectedImages = form
+			.getAll('selectedImages')
+			.map((v) => v.toString().trim())
+			.filter(Boolean);
 
 		if (!input.title) return fail(400, { message: 'Title is required.' });
 
 		const id = createRecipe(db, input);
 
-		// Best-effort: download and attach the lead image after saving.
-		if (imageUrl) {
-			const buf = await downloadImage(imageUrl);
-			if (buf) await addRecipeImages(db, id, [buf]);
+		// Best-effort: download and attach the selected images after saving.
+		if (selectedImages.length > 0) {
+			const buffers: Buffer[] = [];
+			for (const url of selectedImages) {
+				const buf = await downloadImage(url);
+				if (buf) buffers.push(buf);
+			}
+			if (buffers.length > 0) await addRecipeImages(db, id, buffers);
 		}
 
 		throw redirect(303, `/recipe/${encodeId(id)}`);
