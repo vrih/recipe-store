@@ -64,6 +64,26 @@ describe('searchRecipeCards — text', () => {
 	it('does not throw on FTS special characters', () => {
 		expect(() => searchRecipeCards(db, { q: 'cake AND "soup' })).not.toThrow();
 	});
+
+	it('treats % in the query as a literal character in tag matching, not a LIKE wildcard', () => {
+		make(db, { title: 'Exact Tag Recipe', tags: ['unicorn%'] });
+		make(db, { title: 'Prefix Tag Recipe', tags: ['unicorncake'] });
+		// Neither title contains "unicorn", so FTS matches nothing here — this
+		// exercises only the tag-name LIKE branch. Unescaped, '%' in the query
+		// becomes a wildcard, so "unicorn%" would incorrectly also match the
+		// "unicorncake" tag; escaped, it matches only a tag containing a literal "%".
+		expect(titles(searchRecipeCards(db, { q: 'unicorn%' }))).toEqual(['Exact Tag Recipe']);
+	});
+});
+
+describe('searchRecipeCards — pagination', () => {
+	it('limits results and reports enough rows to detect a next page', () => {
+		const page1 = searchRecipeCards(db, { sort: 'title', limit: 2, offset: 0 });
+		expect(titles(page1)).toEqual(['Beef Stew', 'Carrot Soup']);
+
+		const page2 = searchRecipeCards(db, { sort: 'title', limit: 2, offset: 2 });
+		expect(titles(page2)).toEqual(['Chocolate Cake']);
+	});
 });
 
 describe('searchRecipeCards — filters', () => {

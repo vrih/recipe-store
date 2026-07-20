@@ -52,6 +52,10 @@ export interface SearchParams {
 	favorite?: boolean;
 	wantToCook?: boolean;
 	sort?: SortKey;
+	/** Max rows to return. Omit for no limit. */
+	limit?: number;
+	/** Rows to skip, for paging. Ignored unless `limit` is also set. */
+	offset?: number;
 }
 
 type CardRow = Pick<RecipeRow, 'id' | 'title' | 'favorite' | 'want_to_cook'> & {
@@ -79,9 +83,9 @@ function toFtsQuery(q: string): string | null {
 	return tokens.map((t) => `"${t}"*`).join(' ');
 }
 
-/** List recipes as cards for the index grid (no filters). */
-export function listRecipeCards(db: Database.Database, sort: SortKey = 'created'): RecipeCard[] {
-	return searchRecipeCards(db, { sort });
+/** Escape LIKE wildcards (`%`, `_`) so a search term matches only literally. */
+function likeEscape(s: string): string {
+	return s.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
 /**
@@ -96,20 +100,20 @@ export function searchRecipeCards(db: Database.Database, p: SearchParams): Recip
 
 	if (p.q && p.q.trim()) {
 		const fts = toFtsQuery(p.q);
-		const like = `%${p.q.trim()}%`;
+		const like = `%${likeEscape(p.q.trim())}%`;
 		params.qlike = like;
 		if (fts) {
 			params.fts = fts;
 			where.push(
 				`(r.rowid IN (SELECT rowid FROM recipes_fts WHERE recipes_fts MATCH @fts)
           OR EXISTS (SELECT 1 FROM recipe_tags rt JOIN tags t ON t.id = rt.tag_id
-                     WHERE rt.recipe_id = r.id AND t.name LIKE @qlike))`
+                     WHERE rt.recipe_id = r.id AND t.name LIKE @qlike ESCAPE '\\'))`
 			);
 		} else {
 			// Query had no tokens (pure punctuation); fall back to tag-name LIKE only.
 			where.push(
 				`EXISTS (SELECT 1 FROM recipe_tags rt JOIN tags t ON t.id = rt.tag_id
-                 WHERE rt.recipe_id = r.id AND t.name LIKE @qlike)`
+                 WHERE rt.recipe_id = r.id AND t.name LIKE @qlike ESCAPE '\\')`
 			);
 		}
 	}
@@ -126,12 +130,20 @@ export function searchRecipeCards(db: Database.Database, p: SearchParams): Recip
 	if (p.favorite) where.push('r.favorite = 1');
 	if (p.wantToCook) where.push('r.want_to_cook = 1');
 
+	let limitClause = '';
+	if (p.limit != null) {
+		params.limit = p.limit;
+		params.offset = p.offset ?? 0;
+		limitClause = 'LIMIT @limit OFFSET @offset';
+	}
+
 	const sql = `
     SELECT r.id, r.title, r.favorite, r.want_to_cook,
            (SELECT path FROM recipe_images WHERE recipe_id = r.id ORDER BY position LIMIT 1) AS img
     FROM recipes r
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY ${SORT_SQL[sort]}`;
+    ORDER BY ${SORT_SQL[sort]}
+    ${limitClause}`;
 
 	return toCards(db.prepare(sql).all(params) as CardRow[]);
 }

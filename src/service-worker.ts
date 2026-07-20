@@ -81,16 +81,24 @@ sw.addEventListener('fetch', (event) => {
 	}
 });
 
-// Bring the app back to the foreground when a timer notification is tapped.
+// Bring the app back to the foreground when a timer notification is tapped,
+// deep-linking to the recipe the timer belongs to when we know it.
 sw.addEventListener('notificationclick', (event) => {
 	event.notification.close();
+	const recipeEid = (event.notification.data as { recipeEid?: string } | undefined)?.recipeEid;
+	const targetPath = recipeEid ? `${base}/recipe/${recipeEid}` : base || '/';
+
 	event.waitUntil(
 		(async () => {
 			const clientList = await sw.clients.matchAll({ type: 'window', includeUncontrolled: true });
 			for (const client of clientList) {
-				if ('focus' in client) return client.focus();
+				if ('focus' in client && 'navigate' in client) {
+					await client.focus();
+					if (recipeEid) await client.navigate(targetPath).catch(() => {});
+					return;
+				}
 			}
-			return sw.clients.openWindow(base || '/');
+			return sw.clients.openWindow(targetPath);
 		})()
 	);
 });

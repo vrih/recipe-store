@@ -1,12 +1,13 @@
 import type Database from 'better-sqlite3';
 import { mkdirSync, readdirSync, statSync, rmSync } from 'fs';
 import { join } from 'path';
+import { dataDir } from './dataDir.js';
 
 const BACKUP_PREFIX = 'recipes-';
 const BACKUP_SUFFIX = '.db';
 
 function backupsDir(): string {
-	return join(process.env.DATA_DIR ?? './data', 'backups');
+	return join(dataDir(), 'backups');
 }
 
 /** Default number of backups to retain (overridable via BACKUP_KEEP). */

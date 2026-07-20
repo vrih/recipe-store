@@ -92,7 +92,9 @@
 	</form>
 
 	<div class="list-header">
-		<span class="result-count">{data.cards.length} {data.cards.length === 1 ? 'recipe' : 'recipes'}</span>
+		<span class="result-count">
+			{data.cards.length}{data.hasMore ? '+' : ''} {data.cards.length === 1 && !data.hasMore ? 'recipe' : 'recipes'}
+		</span>
 		<div class="layout-toggle">
 			<button type="button" class:active={layout === 'grid'} onclick={() => setLayout('grid')} aria-label="Grid view">
 				<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -194,6 +196,17 @@
 				</li>
 			{/each}
 		</ul>
+	{/if}
+
+	{#if data.prevPageHref || data.nextPageHref}
+		<div class="pager">
+			{#if data.prevPageHref}
+				<a href={data.prevPageHref} class="pager-btn">← Previous</a>
+			{/if}
+			{#if data.nextPageHref}
+				<a href={data.nextPageHref} class="pager-btn">Next →</a>
+			{/if}
+		</div>
 	{/if}
 </div>
 
@@ -577,5 +590,29 @@
 		background: transparent;
 		box-shadow: none;
 		border: 1px solid #e9e1d4;
+	}
+
+	/* ---- Pager ---- */
+	.pager {
+		display: flex;
+		justify-content: center;
+		gap: 0.75rem;
+		margin: 2rem 0 1rem;
+	}
+
+	.pager-btn {
+		font-size: 0.9rem;
+		font-weight: 600;
+		padding: 0.6rem 1.2rem;
+		border: 1px solid #e4dbcc;
+		border-radius: 10px;
+		background: #fff;
+		color: #2b2723;
+		text-decoration: none;
+	}
+
+	.pager-btn:hover {
+		border-color: #c0644a;
+		color: #c0644a;
 	}
 </style>

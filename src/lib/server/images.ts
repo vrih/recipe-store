@@ -2,6 +2,7 @@ import sharp from 'sharp';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { createHash, randomUUID } from 'crypto';
+import { dataDir } from './dataDir.js';
 
 // Bound sharp/libvips memory: disable the operation cache and serialize work.
 // Without this, a large batch import (many images) balloons native memory and
@@ -18,11 +19,6 @@ const THUMB_WIDTH = 400;
 const MAX_INPUT_PIXELS = 60_000_000; // 60 megapixels
 
 const SHARP_OPTS = { failOn: 'none' as const, limitInputPixels: MAX_INPUT_PIXELS };
-
-/** Read the data directory at call time so tests can override it via env. */
-function dataDir(): string {
-	return process.env.DATA_DIR ?? './data';
-}
 
 /** Map sharp's detected format to a file extension for the stored original. */
 const FORMAT_EXT: Record<string, string> = {
@@ -111,7 +107,11 @@ export async function saveImageBuffer(
 			.toFile(join(dataDir(), thumbPathFor(relFull)));
 
 		return relFull;
-	} catch {
+	} catch (err) {
+		console.warn(
+			`[images] could not process an image for recipe ${recipeId}:`,
+			err instanceof Error ? err.message : err
+		);
 		return null;
 	}
 }

@@ -2,6 +2,8 @@ import type Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
 import { saveImageBuffer, deleteImageFile, deleteRecipeImages } from './images.js';
 import { getRecipeImages } from './recipes.js';
+import { setRecipeTags } from './tags.js';
+import { recipeColumnParams } from './recipeColumns.js';
 
 /** Thrown when an optimistic-concurrency version check fails (lost-update). */
 export class ConflictError extends Error {
@@ -61,39 +63,7 @@ export function recipeInputFromForm(form: FormData): RecipeInput {
 }
 
 function params(id: string, input: RecipeInput) {
-	return {
-		id,
-		title: input.title,
-		text: input.text,
-		yield: input.yield,
-		prep_time: input.prepTime,
-		cook_time: input.cookTime,
-		total_time: input.totalTime,
-		ingredients: input.ingredients,
-		instructions: input.instructions,
-		notes: input.notes,
-		nutrition: input.nutrition,
-		link: input.link,
-		favorite: input.favorite ? 1 : 0,
-		want_to_cook: input.wantToCook ? 1 : 0
-	};
-}
-
-/** Replace a recipe's tag associations with the given names (creating tags). */
-function setRecipeTags(db: Database.Database, recipeId: string, names: string[]): void {
-	db.prepare('DELETE FROM recipe_tags WHERE recipe_id = ?').run(recipeId);
-	const insTag = db.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)');
-	const selTag = db.prepare('SELECT id FROM tags WHERE name = ?');
-	const link = db.prepare('INSERT OR IGNORE INTO recipe_tags (recipe_id, tag_id) VALUES (?, ?)');
-	const seen = new Set<string>();
-	for (const raw of names) {
-		const name = raw.trim();
-		if (!name || seen.has(name.toLowerCase())) continue;
-		seen.add(name.toLowerCase());
-		insTag.run(name);
-		const row = selTag.get(name) as { id: number } | undefined;
-		if (row) link.run(recipeId, row.id);
-	}
+	return { id, ...recipeColumnParams(input) };
 }
 
 /** Create a new recipe from scratch. Returns the generated id. */
@@ -179,32 +149,34 @@ export async function addRecipeImages(
 	}
 }
 
-/** Delete a single image (by current position) and renumber the rest. */
-export function deleteRecipeImage(db: Database.Database, id: string, position: number): void {
+/** Delete a single image (by current position) and renumber the rest. Returns false if not found. */
+export function deleteRecipeImage(db: Database.Database, id: string, position: number): boolean {
 	const row = db
 		.prepare('SELECT path FROM recipe_images WHERE recipe_id = ? AND position = ?')
 		.get(id, position) as { path: string } | undefined;
-	if (!row) return;
+	if (!row) return false;
 
 	db.transaction(() => {
 		db.prepare('DELETE FROM recipe_images WHERE recipe_id = ? AND position = ?').run(id, position);
 		renumber(db, id);
 	})();
 	deleteImageFile(row.path);
+	return true;
 }
 
 /**
  * Reorder a recipe's images. `order` is the desired sequence of current
  * positions (e.g. [2,0,1]); positions are rewritten to 0..n-1 in that order.
+ * Returns false without making changes if `order` isn't a valid permutation.
  */
-export function reorderRecipeImages(db: Database.Database, id: string, order: number[]): void {
+export function reorderRecipeImages(db: Database.Database, id: string, order: number[]): boolean {
 	const paths = getRecipeImages(db, id);
 	// Validate: order must be a permutation of existing positions.
 	const valid =
 		order.length === paths.length &&
 		new Set(order).size === paths.length &&
 		order.every((p) => p >= 0 && p < paths.length);
-	if (!valid) return;
+	if (!valid) return false;
 
 	db.transaction(() => {
 		// Move to a temporary offset first to avoid PK collisions mid-update.
@@ -218,6 +190,7 @@ export function reorderRecipeImages(db: Database.Database, id: string, order: nu
 		);
 		order.forEach((oldPos, newPos) => set.run(newPos, id, oldPos + offset));
 	})();
+	return true;
 }
 
 /** Compact positions to a contiguous 0..n-1 sequence (after a deletion). */

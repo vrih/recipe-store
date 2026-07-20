@@ -53,7 +53,7 @@ const SYSTEM_PROMPT =
 	'a field as an empty string (or empty array for categories) if it is not present. ' +
 	'For ingredients, put one ingredient per line. For instructions, separate steps ' +
 	'with blank lines. Do not prefix new lines with a number. Temperatures should only ' +
-        'be presented in Celcius. If metric and imperial weights are both provided then ' +
+        'be presented in Celsius. If metric and imperial weights are both provided then ' +
         'just use the metric. Do not invent quantities, steps, or nutrition values.';
 
 /** Pull the JSON text block out of a Claude response and parse it. */
@@ -65,6 +65,20 @@ function parseJsonResponse(response: Anthropic.Messages.Message): Record<string,
 	} catch {
 		throw new Error('Claude returned an unparseable response');
 	}
+}
+
+const CLEANUP_FIELD_KEYS = [
+	'title', 'text', 'ingredients', 'instructions', 'yield',
+	'prepTime', 'cookTime', 'totalTime', 'notes', 'nutrition'
+] as const;
+
+/** Pull the shared recipe-text fields out of a parsed Claude JSON response, defaulting missing/non-string values to ''. */
+function extractCleanupFields(parsed: Record<string, unknown>): CleanupInput {
+	const out = {} as CleanupInput;
+	for (const key of CLEANUP_FIELD_KEYS) {
+		out[key] = typeof parsed[key] === 'string' ? (parsed[key] as string) : '';
+	}
+	return out;
 }
 
 /**
@@ -89,18 +103,8 @@ export async function extractWithClaude(html: string, url: string): Promise<Mela
 	});
 
 	const parsed = parseJsonResponse(response);
-	const s = (k: string) => (typeof parsed[k] === 'string' ? (parsed[k] as string) : '');
 	return {
-		title: s('title'),
-		text: s('text'),
-		ingredients: s('ingredients'),
-		instructions: s('instructions'),
-		yield: s('yield'),
-		prepTime: s('prepTime'),
-		cookTime: s('cookTime'),
-		totalTime: s('totalTime'),
-		notes: s('notes'),
-		nutrition: s('nutrition'),
+		...extractCleanupFields(parsed),
 		categories: Array.isArray(parsed.categories)
 			? (parsed.categories as unknown[]).map(String).filter(Boolean)
 			: []
@@ -187,18 +191,5 @@ export async function cleanupRecipe(input: CleanupInput): Promise<CleanupInput> 
 		output_config: { format: { type: 'json_schema', schema: CLEANUP_SCHEMA } }
 	});
 
-	const parsed = parseJsonResponse(response);
-	const s = (k: string) => (typeof parsed[k] === 'string' ? (parsed[k] as string) : '');
-	return {
-		title: s('title'),
-		text: s('text'),
-		ingredients: s('ingredients'),
-		instructions: s('instructions'),
-		yield: s('yield'),
-		prepTime: s('prepTime'),
-		cookTime: s('cookTime'),
-		totalTime: s('totalTime'),
-		notes: s('notes'),
-		nutrition: s('nutrition')
-	};
+	return extractCleanupFields(parseJsonResponse(response));
 }
