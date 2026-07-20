@@ -46,7 +46,7 @@ docker compose up -d --build
 
 Then open it at your `ORIGIN` and head to **Import** to bring your library in.
 
-> **Heads up:** `ORIGIN` must match the address you actually use (e.g. your Tailscale hostname) or uploads will be refused, and give the container a bit of memory headroom (the compose file requests 1 GB) — importing a big library decodes a lot of images.
+> **Heads up:** `ORIGIN` must match the address you actually use (e.g. your Tailscale hostname) or uploads will be refused, and give the container a bit of memory headroom (the compose file requests 1 GB) — importing a big library decodes a lot of images. The container runs as a non-root user (uid 1000); if `./data` already exists from an older version of the image, run `sudo chown -R 1000:1000 ./data` once so it stays writable.
 
 ### Developing
 

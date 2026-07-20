@@ -2,8 +2,9 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'fs';
 import { join } from 'path';
 import { runMigrations } from './migrate.js';
+import { dataDir } from './dataDir.js';
 
-export const DATA_DIR = process.env.DATA_DIR ?? './data';
+export const DATA_DIR = dataDir();
 
 /**
  * Open a SQLite database at the given data directory, apply pragmas, and run

@@ -1,7 +1,13 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import db from '$lib/server/db';
-import { fetchPage, extractJsonLd, downloadImage, extractImageCandidates } from '$lib/server/scrape';
+import {
+	fetchPage,
+	extractJsonLd,
+	downloadImage,
+	extractImageCandidates,
+	FetchStatusError
+} from '$lib/server/scrape';
 import { extractWithClaude, cleanupRecipe, claudeAvailable, pickCleanupFields } from '$lib/server/claude';
 import { createRecipe, addRecipeImages, recipeInputFromForm } from '$lib/server/edit';
 import type { MelaRecipe } from '$lib/server/mela';
@@ -27,31 +33,14 @@ function toFormValues(recipe: MelaRecipe, url: string) {
 	};
 }
 
-/** Build the fetch-action response: original values plus, if Claude is configured, a cleaned-up alternative. */
-async function buildResult(
-	method: 'structured' | 'claude',
-	url: string,
-	recipe: MelaRecipe,
-	imageUrls: string[]
-) {
-	const values = toFormValues(recipe, url);
-	let cleaned: { values: ReturnType<typeof toFormValues> } | null = null;
-	if (claudeAvailable()) {
-		try {
-			const cleanedFields = await cleanupRecipe(pickCleanupFields(recipe));
-			cleaned = { values: { ...values, ...cleanedFields } };
-		} catch {
-			// Best-effort: cleanup failing shouldn't block the import.
-			cleaned = null;
-		}
-	}
+/** Build the fetch-action response. Claude cleanup is offered on-demand (see the `cleanup` action) rather than run eagerly here. */
+function buildResult(method: 'structured' | 'claude', url: string, recipe: MelaRecipe, imageUrls: string[]) {
 	return {
 		fetched: true as const,
 		method,
 		url,
-		values,
+		values: toFormValues(recipe, url),
 		tags: (recipe.categories ?? []).join(', '),
-		cleaned,
 		imageUrls
 	};
 }
@@ -78,7 +67,7 @@ async function extractFromHtml(html: string, url: string) {
 }
 
 // Statuses that mean the site refused our server (anti-bot / paywall / blocked IP).
-const BLOCK_STATUS = /HTTP (401|402|403|429|451|503)/;
+const BLOCK_STATUSES = new Set([401, 402, 403, 429, 451, 503]);
 
 export const actions: Actions = {
 	// Fetch + extract a recipe to pre-fill the editor (no DB write).
@@ -95,8 +84,8 @@ export const actions: Actions = {
 		try {
 			html = await fetchPage(url);
 		} catch (err) {
+			const blocked = err instanceof FetchStatusError && BLOCK_STATUSES.has(err.status);
 			const msg = err instanceof Error ? err.message : 'Could not fetch the page.';
-			const blocked = BLOCK_STATUS.test(msg);
 			return fail(502, {
 				url,
 				blocked,
@@ -111,7 +100,7 @@ export const actions: Actions = {
 			try {
 				const recipe = await extractWithClaude(html, url);
 				const imageUrls = extractImageCandidates(html, url);
-				return await buildResult('claude', url, recipe, imageUrls);
+				return buildResult('claude', url, recipe, imageUrls);
 			} catch (err) {
 				return fail(502, { url, message: err instanceof Error ? err.message : 'Claude extraction failed.' });
 			}
@@ -180,5 +169,20 @@ export const actions: Actions = {
 		}
 
 		throw redirect(303, `/recipe/${encodeId(id)}`);
+	},
+
+	// Ask Claude to tidy up the currently-entered text fields (no DB write).
+	cleanup: async ({ request }) => {
+		if (!claudeAvailable()) return fail(422, { message: 'Claude is not configured.' });
+
+		const form = await request.formData();
+		const input = recipeInputFromForm(form);
+
+		try {
+			const cleaned = await cleanupRecipe(pickCleanupFields(input));
+			return { cleanupResult: true as const, original: pickCleanupFields(input), cleaned };
+		} catch (err) {
+			return fail(502, { message: err instanceof Error ? err.message : 'Claude cleanup failed.' });
+		}
 	}
 };

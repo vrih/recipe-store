@@ -1,14 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { zipSync, strToU8 } from 'fflate';
-import {
-	parseMelaRecipe,
-	parseMelaArchive,
-	parseUpload,
-	walkUpload,
-	appleDateToUnixMs,
-	APPLE_EPOCH_OFFSET,
-	type ParsedEntry
-} from './mela.js';
+import { strToU8 } from 'fflate';
+import { parseMelaRecipe, isMacOsCruft, appleDateToUnixMs, APPLE_EPOCH_OFFSET } from './mela.js';
 
 const sampleRecipe = {
 	id: 'example.com/pancakes',
@@ -53,92 +45,16 @@ describe('parseMelaRecipe', () => {
 	});
 });
 
-describe('parseMelaArchive', () => {
-	it('extracts recipes from a flat archive', () => {
-		const zip = zipSync({
-			'pancakes.melarecipe': recipeBytes(sampleRecipe),
-			'waffles.melarecipe': recipeBytes({ ...sampleRecipe, id: 'x/waffles', title: 'Waffles' })
-		});
-		const entries = parseMelaArchive(zip);
-		expect(entries).toHaveLength(2);
-		expect(entries.map((e) => e.recipe?.title).sort()).toEqual(['Pancakes', 'Waffles']);
-	});
+// Archive parsing (recursion, macOS-cruft skipping, malformed-entry capture,
+// and dispatch-by-extension) is exercised end-to-end via the streaming import
+// path in import.test.ts's `importStream` suite, which is what production
+// actually uses — no separate coverage needed here.
 
-	it('recurses into nested archives', () => {
-		const inner = zipSync({ 'pancakes.melarecipe': recipeBytes(sampleRecipe) });
-		const outer = zipSync({ 'nested.melarecipes': inner });
-		const entries = parseMelaArchive(outer);
-		expect(entries).toHaveLength(1);
-		expect(entries[0].recipe?.title).toBe('Pancakes');
-	});
-
-	it('ignores macOS cruft and captures malformed entries', () => {
-		const zip = zipSync({
-			'__MACOSX/._pancakes.melarecipe': strToU8('garbage'),
-			'good.melarecipe': recipeBytes(sampleRecipe),
-			'bad.melarecipe': strToU8('{broken')
-		});
-		const entries = parseMelaArchive(zip);
-		expect(entries).toHaveLength(2);
-		expect(entries.filter((e) => e.recipe)).toHaveLength(1);
-		expect(entries.filter((e) => e.error)).toHaveLength(1);
-	});
-});
-
-describe('parseUpload', () => {
-	it('dispatches single recipe files', () => {
-		const entries = parseUpload('pancakes.melarecipe', recipeBytes(sampleRecipe));
-		expect(entries).toHaveLength(1);
-		expect(entries[0].recipe?.title).toBe('Pancakes');
-	});
-
-	it('dispatches archive files', () => {
-		const zip = zipSync({ 'pancakes.melarecipe': recipeBytes(sampleRecipe) });
-		const entries = parseUpload('library.melarecipes', zip);
-		expect(entries).toHaveLength(1);
-	});
-
-	it('captures a malformed single file without throwing', () => {
-		const entries = parseUpload('bad.melarecipe', strToU8('{broken'));
-		expect(entries).toHaveLength(1);
-		expect(entries[0].error).toBeDefined();
-	});
-});
-
-describe('walkUpload (streaming)', () => {
-	async function collect(filename: string, data: Uint8Array): Promise<ParsedEntry[]> {
-		const out: ParsedEntry[] = [];
-		await walkUpload(filename, data, (entry) => {
-			// Copy fields, since the importer nulls entry.recipe after each call.
-			out.push({ source: entry.source, recipe: entry.recipe, error: entry.error });
-		});
-		return out;
-	}
-
-	it('streams recipes from a flat archive', async () => {
-		const zip = zipSync({
-			'a.melarecipe': recipeBytes(sampleRecipe),
-			'b.melarecipe': recipeBytes({ ...sampleRecipe, id: 'x/b', title: 'B' })
-		});
-		const entries = await collect('lib.melarecipes', zip);
-		expect(entries.map((e) => e.recipe?.title).sort()).toEqual(['B', 'Pancakes']);
-	});
-
-	it('recurses into nested archives and captures malformed entries', async () => {
-		const inner = zipSync({ 'good.melarecipe': recipeBytes(sampleRecipe) });
-		const zip = zipSync({
-			'nested.melarecipes': inner,
-			'bad.melarecipe': strToU8('{broken'),
-			'__MACOSX/._good.melarecipe': strToU8('junk')
-		});
-		const entries = await collect('lib.melarecipes', zip);
-		expect(entries.filter((e) => e.recipe)).toHaveLength(1);
-		expect(entries.filter((e) => e.error)).toHaveLength(1);
-	});
-
-	it('streams a single recipe file', async () => {
-		const entries = await collect('pancakes.melarecipe', recipeBytes(sampleRecipe));
-		expect(entries).toHaveLength(1);
-		expect(entries[0].recipe?.title).toBe('Pancakes');
+describe('isMacOsCruft', () => {
+	it('recognises __MACOSX entries and .DS_Store files', () => {
+		expect(isMacOsCruft('__MACOSX/._pancakes.melarecipe')).toBe(true);
+		expect(isMacOsCruft('some/dir/.DS_Store')).toBe(true);
+		expect(isMacOsCruft('.DS_Store')).toBe(true);
+		expect(isMacOsCruft('pancakes.melarecipe')).toBe(false);
 	});
 });

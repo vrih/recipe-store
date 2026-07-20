@@ -190,7 +190,10 @@ class TimerStore {
 			badge: '/icons/icon-192.png',
 			// vibrate is non-standard in the TS lib but honoured by Android.
 			...({ vibrate: [200, 100, 200] } as object),
-			requireInteraction: true
+			requireInteraction: true,
+			// Read back in the service worker's notificationclick handler to
+			// deep-link to the recipe this timer belongs to.
+			data: { recipeEid: timer.recipeEid }
 		};
 		try {
 			const reg = await navigator.serviceWorker?.getRegistration();
