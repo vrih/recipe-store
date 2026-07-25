@@ -23,6 +23,7 @@
 	let fetching = $state(false);
 	let pasting = $state(false);
 	let showPaste = $state(false);
+	let saving = $state(false);
 	let cleaningUp = $state(false);
 
 	// When a fetch succeeds, `form.fetched` carries the pre-filled values. Note
@@ -176,10 +177,11 @@
 
 		<form
 			method="POST"
-			action="?/create"
+			action="/import/url?/create"
 			use:enhance={(submit) => {
 				const isCleanup = submit.action.search.includes('cleanup');
 				if (isCleanup) cleaningUp = true;
+				else saving = true;
 				return async ({ result, update }) => {
 					if (isCleanup) {
 						cleaningUp = false;
@@ -193,6 +195,7 @@
 						}
 						return;
 					}
+					saving = false;
 					await update();
 				};
 			}}
@@ -221,9 +224,14 @@
 				<RecipeForm recipe={currentValues} tags={currentTags} />
 			{/key}
 			<div class="actions">
-				<button type="submit" disabled={cleaningUp}>Save recipe</button>
+				<button type="submit" disabled={saving || cleaningUp}>{saving ? 'Saving…' : 'Save recipe'}</button>
 				{#if data.claudeAvailable}
-					<button type="submit" formaction="?/cleanup" class="secondary" disabled={cleaningUp}>
+					<button
+						type="submit"
+						formaction="/import/url?/cleanup"
+						class="secondary"
+						disabled={saving || cleaningUp}
+					>
 						{cleaningUp ? 'Asking Claude…' : 'Clean up with Claude'}
 					</button>
 				{/if}
