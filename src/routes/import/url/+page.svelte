@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { untrack } from 'svelte';
 	import RecipeForm from '$lib/components/RecipeForm.svelte';
 	import RecipeCompare from '$lib/components/RecipeCompare.svelte';
 	import type { PageData, ActionData } from './$types';
@@ -55,7 +56,10 @@
 		if (fetched) {
 			currentValues = seedValues();
 			currentTags = fetched.tags;
-			formVersion++;
+			// Read via untrack: formVersion is only ever written here and in
+			// chooseVersion, never read reactively — reading it normally would
+			// make this effect depend on its own write and loop forever.
+			formVersion = untrack(() => formVersion) + 1;
 			compare = null;
 		}
 	});
@@ -179,6 +183,13 @@
 			method="POST"
 			action="/import/url?/create"
 			use:enhance={(submit) => {
+				// The `disabled` attribute below only takes effect on the next DOM
+				// update, so a second click landing before that flush would still
+				// fire this handler and POST again. Guard the submission itself.
+				if (saving || cleaningUp) {
+					submit.cancel();
+					return;
+				}
 				const isCleanup = submit.action.search.includes('cleanup');
 				if (isCleanup) cleaningUp = true;
 				else saving = true;
