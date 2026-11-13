@@ -2,8 +2,23 @@
 	import { enhance } from '$app/forms';
 	import { beforeNavigate, goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
+	import { untrack } from 'svelte';
 	import RecipeForm from '$lib/components/RecipeForm.svelte';
+	import RecipeCompare from '$lib/components/RecipeCompare.svelte';
 	import type { PageData, ActionData } from './$types';
+
+	interface CleanupFields {
+		title: string;
+		text: string;
+		yield: string;
+		prepTime: string;
+		cookTime: string;
+		totalTime: string;
+		ingredients: string;
+		instructions: string;
+		notes: string;
+		nutrition: string;
+	}
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
@@ -15,6 +30,44 @@
 	let saving = $state(false);
 	let uploading = $state(false);
 	const justCreated = page.url.searchParams.get('created') === '1';
+
+	// Editable field values live here so a Claude cleanup can replace them
+	// wholesale; bumping formVersion forces RecipeForm to remount with the
+	// new values (its inputs are otherwise uncontrolled).
+	let currentRecipeValues = $state(untrack(() => ({ ...data.recipe })));
+	let currentTags = $state(untrack(() => data.tags));
+	let formVersion = $state(0);
+
+	let cleaningUp = $state(false);
+	let suggesting = $state(false);
+	let suggestions = $state<{ existing: string[]; new: string[] } | null>(null);
+
+	function splitTags(csv: string): string[] {
+		return csv.split(',').map((t) => t.trim()).filter(Boolean);
+	}
+
+	function addTag(tag: string) {
+		const tags = splitTags(currentTags);
+		if (!tags.some((t) => t.toLowerCase() === tag.toLowerCase())) tags.push(tag);
+		currentTags = tags.join(', ');
+		dirty = true;
+		if (suggestions) {
+			suggestions = {
+				existing: suggestions.existing.filter((t) => t !== tag),
+				new: suggestions.new.filter((t) => t !== tag)
+			};
+		}
+	}
+	let compare = $state<{ original: CleanupFields; cleaned: CleanupFields } | null>(null);
+
+	function chooseVersion(side: 'left' | 'right') {
+		if (side === 'right' && compare) {
+			currentRecipeValues = { ...currentRecipeValues, ...compare.cleaned };
+			formVersion++;
+			dirty = true;
+		}
+		compare = null;
+	}
 
 	// Warn before leaving with unsaved text changes (FR-EDIT-5).
 	beforeNavigate((nav) => {
@@ -102,9 +155,36 @@
 	method="POST"
 	action="?/save"
 	oninput={() => (dirty = true)}
-	use:enhance={() => {
-		saving = true;
+	use:enhance={(submit) => {
+		const isCleanup = submit.action.search.includes('cleanup');
+		const isSuggest = submit.action.search.includes('suggestTags');
+		if (isSuggest) {
+			suggesting = true;
+			suggestions = null;
+		} else if (isCleanup) cleaningUp = true;
+		else saving = true;
 		return async ({ result, update }) => {
+			if (isSuggest) {
+				suggesting = false;
+				if (result.type === 'success' && result.data && 'tagSuggestions' in result.data) {
+					suggestions = result.data.tagSuggestions as { existing: string[]; new: string[] };
+				} else {
+					await update({ reset: false });
+				}
+				return;
+			}
+			if (isCleanup) {
+				cleaningUp = false;
+				if (result.type === 'success' && result.data && 'cleanupResult' in result.data) {
+					compare = {
+						original: result.data.original as CleanupFields,
+						cleaned: result.data.cleaned as CleanupFields
+					};
+				} else {
+					await update();
+				}
+				return;
+			}
 			saving = false;
 			if (result.type === 'success') {
 				dirty = false;
@@ -116,13 +196,52 @@
 	}}
 >
 	<input type="hidden" name="version" value={data.recipe.version} />
-	<RecipeForm recipe={data.recipe} tags={data.tags} />
+	{#key formVersion}
+		<RecipeForm recipe={currentRecipeValues} bind:tags={currentTags} />
+	{/key}
 
 	<div class="actions">
-		<button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
+		<button type="submit" disabled={saving || cleaningUp}>{saving ? 'Saving…' : 'Save changes'}</button>
+		{#if data.claudeAvailable}
+			<button type="submit" formaction="?/cleanup" class="secondary" disabled={saving || cleaningUp}>
+				{cleaningUp ? 'Asking Claude…' : 'Clean up with Claude'}
+			</button>
+		{/if}
 		<a href="/recipe/{data.eid}">Cancel</a>
 	</div>
+	{#if data.claudeAvailable}
+		<div class="suggest">
+			<button type="submit" formaction="?/suggestTags" class="secondary" disabled={saving || cleaningUp || suggesting}>
+				{suggesting ? 'Thinking…' : 'Suggest tags'}
+			</button>
+			{#if suggestions}
+				{#if suggestions.existing.length === 0 && suggestions.new.length === 0}
+					<span class="hint">No further tags to suggest.</span>
+				{/if}
+				{#each suggestions.existing as tag (tag)}
+					<button type="button" class="chip" onclick={() => addTag(tag)}>+ {tag}</button>
+				{/each}
+				{#each suggestions.new as tag (tag)}
+					<button type="button" class="chip new" onclick={() => addTag(tag)} title="Creates a new tag">+ {tag} <em>new</em></button>
+				{/each}
+			{/if}
+		</div>
+	{/if}
 </form>
+
+{#if compare}
+	<section class="cleanup-compare">
+		<h2 class="section-title">Claude cleanup</h2>
+		<p class="hint">Compare your current text with a Claude-tidied version, and pick which one to use.</p>
+		<RecipeCompare
+			leftLabel="Current"
+			rightLabel="Claude cleaned up"
+			left={compare.original}
+			right={compare.cleaned}
+			onChoose={chooseVersion}
+		/>
+	</section>
+{/if}
 
 <section class="images-section">
 	<h2>Images</h2>
@@ -208,14 +327,43 @@
 		color: #fff;
 		border: none;
 	}
+	.actions button[type='submit'].secondary {
+		background: #fff;
+		color: #1c1917;
+		border: 1px solid #d6d3d1;
+	}
+	.suggest {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 0.75rem;
+	}
+	.suggest .chip {
+		padding: 0.25rem 0.7rem;
+		border-radius: 999px;
+		font-size: 0.85rem;
+	}
+	.suggest .chip.new {
+		border-style: dashed;
+	}
+	.suggest .chip em {
+		font-size: 0.7rem;
+		color: #78716c;
+	}
 	button.danger {
 		color: #b91c1c;
 		border-color: #fecaca;
 	}
 	.images-section,
-	.danger-zone {
+	.danger-zone,
+	.cleanup-compare {
 		max-width: 760px;
 		margin-top: 2rem;
+	}
+	.cleanup-compare .section-title {
+		margin: 0 0 0.25rem;
+		font-size: 1.05rem;
 	}
 	.image-list {
 		list-style: none;

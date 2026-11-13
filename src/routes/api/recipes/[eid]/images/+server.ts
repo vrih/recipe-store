@@ -43,7 +43,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 export const DELETE: RequestHandler = async ({ params, request }) => {
 	const id = resolveId(params.eid);
 	const { position } = await request.json();
-	deleteRecipeImage(db, id, Number(position));
+	if (!deleteRecipeImage(db, id, Number(position))) throw error(404, 'Image not found');
 	return json({ images: currentImages(id) });
 };
 
@@ -52,6 +52,8 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 	const id = resolveId(params.eid);
 	const { order } = await request.json();
 	if (!Array.isArray(order)) throw error(400, 'order must be an array');
-	reorderRecipeImages(db, id, order.map(Number));
+	if (!reorderRecipeImages(db, id, order.map(Number))) {
+		throw error(400, 'order must be a permutation of the current image positions');
+	}
 	return json({ images: currentImages(id) });
 };

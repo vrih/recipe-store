@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractJsonLd } from './scrape.js';
+import { extractJsonLd, extractImageCandidates } from './scrape.js';
 
 function pageWith(jsonLd: unknown): string {
 	return `<html><head>
@@ -108,5 +108,37 @@ describe('extractJsonLd', () => {
 	it('ignores malformed JSON-LD blocks', () => {
 		const html = `<script type="application/ld+json">{ broken</script>` + pageWith(baseRecipe);
 		expect(extractJsonLd(html)!.recipe.title).toBe('Pancakes');
+	});
+});
+
+describe('extractImageCandidates', () => {
+	it('collects every JSON-LD image before meta images, resolving relative URLs', () => {
+		const html = pageWith({
+			...baseRecipe,
+			image: ['/pancakes-1.jpg', { '@type': 'ImageObject', url: 'https://example.com/pancakes-2.jpg' }]
+		}).replace(
+			'</head>',
+			'<meta property="og:image" content="https://example.com/og.jpg" /></head>'
+		);
+		const urls = extractImageCandidates(html, 'https://example.com/recipes/pancakes');
+		expect(urls).toEqual([
+			'https://example.com/pancakes-1.jpg',
+			'https://example.com/pancakes-2.jpg',
+			'https://example.com/og.jpg'
+		]);
+	});
+
+	it('falls back to og:image/twitter:image when there is no JSON-LD', () => {
+		const html = `<html><head>
+			<meta property="og:image" content="https://example.com/hero.jpg" />
+			<meta name="twitter:image" content="https://example.com/hero.jpg" />
+			<meta name="twitter:image" content="https://example.com/alt.jpg" />
+		</head><body>no json-ld</body></html>`;
+		const urls = extractImageCandidates(html, 'https://example.com/');
+		expect(urls).toEqual(['https://example.com/hero.jpg', 'https://example.com/alt.jpg']);
+	});
+
+	it('returns an empty list when no images are found', () => {
+		expect(extractImageCandidates('<html><body>none</body></html>', 'https://example.com/')).toEqual([]);
 	});
 });

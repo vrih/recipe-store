@@ -3,6 +3,10 @@ services:
     build: .
     ports:
       - "3000:3000"
+    # The container runs as the non-root "node" user (uid/gid 1000). If
+    # ./data already exists owned by someone else (e.g. root, from an older
+    # version of this image), run `sudo chown -R 1000:1000 ./data` once so
+    # the app can write to it.
     volumes:
       - ./data:/data
     environment:

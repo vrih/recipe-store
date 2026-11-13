@@ -132,26 +132,32 @@ describe('image ordering', () => {
 	it('reorders images to the requested sequence', () => {
 		const id = createRecipe(db, input());
 		addImages(id, 3); // positions 0,1,2 -> paths 0,1,2
-		reorderRecipeImages(db, id, [2, 0, 1]);
+		expect(reorderRecipeImages(db, id, [2, 0, 1])).toBe(true);
 		expect(getRecipeImages(db, id)).toEqual(['images/x/2.png', 'images/x/0.png', 'images/x/1.png']);
 	});
 
-	it('ignores an invalid (non-permutation) order', () => {
+	it('rejects an invalid (non-permutation) order without changing anything', () => {
 		const id = createRecipe(db, input());
 		addImages(id, 3);
-		reorderRecipeImages(db, id, [0, 0, 1]);
+		expect(reorderRecipeImages(db, id, [0, 0, 1])).toBe(false);
 		expect(getRecipeImages(db, id)).toEqual(['images/x/0.png', 'images/x/1.png', 'images/x/2.png']);
 	});
 
 	it('deletes an image and renumbers the rest contiguously', () => {
 		const id = createRecipe(db, input());
 		addImages(id, 3);
-		deleteRecipeImage(db, id, 1);
+		expect(deleteRecipeImage(db, id, 1)).toBe(true);
 		expect(getRecipeImages(db, id)).toEqual(['images/x/0.png', 'images/x/2.png']);
 		const positions = db
 			.prepare('SELECT position FROM recipe_images WHERE recipe_id = ? ORDER BY position')
 			.all(id) as { position: number }[];
 		expect(positions.map((p) => p.position)).toEqual([0, 1]);
+	});
+
+	it('returns false deleting a position that does not exist', () => {
+		const id = createRecipe(db, input());
+		addImages(id, 2);
+		expect(deleteRecipeImage(db, id, 5)).toBe(false);
 	});
 });
 

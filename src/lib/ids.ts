@@ -11,7 +11,12 @@ export function encodeId(id: string): string {
 		.replace(/=+$/, '');
 }
 
+/** Decode an id encoded by `encodeId`. Throws on malformed input (not a valid encoding). */
 export function decodeId(encoded: string): string {
 	const b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
-	return Buffer.from(b64, 'base64').toString('utf-8');
+	const id = Buffer.from(b64, 'base64').toString('utf-8');
+	// Round-trip check: rejects garbage that Buffer.from() would otherwise decode
+	// "successfully" into nonsense (base64 is very permissive about its input).
+	if (encodeId(id) !== encoded) throw new Error('Invalid id');
+	return id;
 }

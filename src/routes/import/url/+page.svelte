@@ -1,7 +1,22 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { untrack } from 'svelte';
 	import RecipeForm from '$lib/components/RecipeForm.svelte';
+	import RecipeCompare from '$lib/components/RecipeCompare.svelte';
 	import type { PageData, ActionData } from './$types';
+
+	interface CleanupFields {
+		title: string;
+		text: string;
+		yield: string;
+		prepTime: string;
+		cookTime: string;
+		totalTime: string;
+		ingredients: string;
+		instructions: string;
+		notes: string;
+		nutrition: string;
+	}
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
@@ -9,8 +24,13 @@
 	let fetching = $state(false);
 	let pasting = $state(false);
 	let showPaste = $state(false);
+	let saving = $state(false);
+	let cleaningUp = $state(false);
 
-	// When a fetch succeeds, `form.fetched` carries the pre-filled values.
+	// When a fetch succeeds, `form.fetched` carries the pre-filled values. Note
+	// this stays truthy across a `cleanup` submission too, since that action's
+	// use:enhance below intentionally skips `update()` on success — otherwise
+	// the cleanup result would replace `form` and this review UI would vanish.
 	const fetched = $derived(form && 'fetched' in form && form.fetched ? form : null);
 	const blocked = $derived(form && 'blocked' in form && form.blocked);
 
@@ -18,6 +38,51 @@
 	$effect(() => {
 		if (blocked) showPaste = true;
 	});
+
+	// Editable field values live here so a Claude cleanup can replace them
+	// wholesale; bumping formVersion forces RecipeForm to remount with the new
+	// values (its inputs are otherwise uncontrolled). Re-seeded whenever a new
+	// fetch/paste result arrives.
+	let currentValues = $state<ReturnType<typeof seedValues> | null>(null);
+	let currentTags = $state('');
+	let formVersion = $state(0);
+	let compare = $state<{ original: CleanupFields; cleaned: CleanupFields } | null>(null);
+
+	function seedValues() {
+		return { ...fetched!.values };
+	}
+
+	$effect(() => {
+		if (fetched) {
+			currentValues = seedValues();
+			currentTags = fetched.tags;
+			// Read via untrack: formVersion is only ever written here and in
+			// chooseVersion, never read reactively — reading it normally would
+			// make this effect depend on its own write and loop forever.
+			formVersion = untrack(() => formVersion) + 1;
+			compare = null;
+		}
+	});
+
+	function chooseVersion(side: 'left' | 'right') {
+		if (side === 'right' && compare && currentValues) {
+			currentValues = { ...currentValues, ...compare.cleaned };
+			formVersion++;
+		}
+		compare = null;
+	}
+
+	// Which candidate images the user wants imported (hero image pre-selected).
+	let selectedImages = $state<string[]>([]);
+	$effect(() => {
+		selectedImages = fetched && fetched.imageUrls.length > 0 ? [fetched.imageUrls[0]] : [];
+	});
+
+	function toggleImage(imgUrl: string, checked: boolean) {
+		selectedImages = checked
+			? [...selectedImages, imgUrl]
+			: selectedImages.filter((u) => u !== imgUrl);
+	}
 </script>
 
 <svelte:head>
@@ -107,24 +172,97 @@
 	</form>
 {/if}
 
-{#if fetched}
+{#if fetched && currentValues}
 	<div class="review">
 		<p class="method">
 			Extracted via <strong>{fetched.method === 'claude' ? 'Claude' : 'structured data'}</strong>.
 			Review and edit before saving.
 		</p>
-		<form method="POST" action="?/create">
-			<input type="hidden" name="link" value={fetched.url} />
-			<input type="hidden" name="imageUrl" value={fetched.imageUrl} />
-			<RecipeForm recipe={fetched.values} tags={fetched.values.tags} />
-			{#if fetched.imageUrl}
-				<p class="hint">Lead image will be downloaded and attached on save.</p>
+
+		<form
+			method="POST"
+			action="/import/url?/create"
+			use:enhance={(submit) => {
+				// The `disabled` attribute below only takes effect on the next DOM
+				// update, so a second click landing before that flush would still
+				// fire this handler and POST again. Guard the submission itself.
+				if (saving || cleaningUp) {
+					submit.cancel();
+					return;
+				}
+				const isCleanup = submit.action.search.includes('cleanup');
+				if (isCleanup) cleaningUp = true;
+				else saving = true;
+				return async ({ result, update }) => {
+					if (isCleanup) {
+						cleaningUp = false;
+						if (result.type === 'success' && result.data && 'cleanupResult' in result.data) {
+							compare = {
+								original: result.data.original as CleanupFields,
+								cleaned: result.data.cleaned as CleanupFields
+							};
+						} else {
+							await update();
+						}
+						return;
+					}
+					saving = false;
+					await update();
+				};
+			}}
+		>
+			{#if fetched.imageUrls.length > 0}
+				<fieldset class="images-pick">
+					<legend>Images to import</legend>
+					<div class="image-candidates">
+						{#each fetched.imageUrls as imgUrl (imgUrl)}
+							<label class="candidate">
+								<input
+									type="checkbox"
+									name="selectedImages"
+									value={imgUrl}
+									checked={selectedImages.includes(imgUrl)}
+									onchange={(e) => toggleImage(imgUrl, e.currentTarget.checked)}
+								/>
+								<img src={imgUrl} alt="" loading="lazy" />
+							</label>
+						{/each}
+					</div>
+					<p class="hint">Selected images will be downloaded and attached on save.</p>
+				</fieldset>
 			{/if}
+			{#key formVersion}
+				<RecipeForm recipe={currentValues} tags={currentTags} />
+			{/key}
 			<div class="actions">
-				<button type="submit">Save recipe</button>
+				<button type="submit" disabled={saving || cleaningUp}>{saving ? 'Saving…' : 'Save recipe'}</button>
+				{#if data.claudeAvailable}
+					<button
+						type="submit"
+						formaction="/import/url?/cleanup"
+						class="secondary"
+						disabled={saving || cleaningUp}
+					>
+						{cleaningUp ? 'Asking Claude…' : 'Clean up with Claude'}
+					</button>
+				{/if}
 				<a href="/import/url">Start over</a>
 			</div>
 		</form>
+
+		{#if compare}
+			<section class="cleanup-compare">
+				<h2 class="section-title">Claude cleanup</h2>
+				<p class="hint">Compare the current text with a Claude-tidied version, and pick which one to use.</p>
+				<RecipeCompare
+					leftLabel="Current"
+					rightLabel="Claude cleaned up"
+					left={compare.original}
+					right={compare.cleaned}
+					onChoose={chooseVersion}
+				/>
+			</section>
+		{/if}
 	</div>
 {/if}
 
@@ -210,6 +348,11 @@
 		opacity: 0.5;
 		cursor: default;
 	}
+	.actions button.secondary {
+		background: #fff;
+		color: #1c1917;
+		border: 1px solid #d6d3d1;
+	}
 	.notice {
 		margin-top: 1rem;
 		padding: 0.85rem 1rem;
@@ -240,5 +383,44 @@
 	.hint {
 		color: #a8a29e;
 		font-size: 0.9rem;
+	}
+	.section-title {
+		margin: 1.5rem 0 0.25rem;
+		font-size: 1.05rem;
+	}
+	.cleanup-compare {
+		margin-top: 1.5rem;
+	}
+	.images-pick {
+		border: 1px solid #e7e5e4;
+		border-radius: 10px;
+		padding: 0.85rem 1rem;
+		margin: 0 0 1.25rem;
+		max-width: 760px;
+	}
+	.images-pick legend {
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: #44403c;
+		padding: 0 0.3rem;
+	}
+	.image-candidates {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+	}
+	.candidate {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.3rem;
+		cursor: pointer;
+	}
+	.candidate img {
+		width: 120px;
+		height: 90px;
+		object-fit: cover;
+		border-radius: 8px;
+		border: 1px solid #e7e5e4;
 	}
 </style>

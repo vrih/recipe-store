@@ -14,13 +14,16 @@ RUN npm prune --omit=dev
 FROM node:22-alpine
 WORKDIR /app
 
-COPY --from=builder /app/build ./build
-COPY --from=builder /app/node_modules ./node_modules
-COPY package.json ./
+# Run as the image's built-in non-root user rather than root.
+COPY --from=builder --chown=node:node /app/build ./build
+COPY --from=builder --chown=node:node /app/node_modules ./node_modules
+COPY --chown=node:node package.json ./
 
 EXPOSE 3000
 ENV PORT=3000
 ENV DATA_DIR=/data
+
+USER node
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
   CMD wget -qO- http://localhost:3000/api/health || exit 1

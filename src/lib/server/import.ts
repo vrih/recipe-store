@@ -2,8 +2,11 @@ import type Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
 import { Unzip, UnzipInflate } from 'fflate';
 import type { MelaRecipe, ParsedEntry } from './mela.js';
-import { appleDateToUnixMs, walkUpload, parseMelaRecipe } from './mela.js';
-import { saveRecipeImages, deleteRecipeImages } from './images.js';
+import { appleDateToUnixMs, isMacOsCruft, parseMelaRecipe } from './mela.js';
+import { saveRecipeImages, deleteImageFile } from './images.js';
+import { getRecipeImages } from './recipes.js';
+import { setRecipeTags } from './tags.js';
+import { recipeColumnParams } from './recipeColumns.js';
 
 /** Cap on retained failure records so a huge bad import can't itself OOM. */
 const MAX_FAILURES = 200;
@@ -22,29 +25,12 @@ function str(v: unknown): string {
 	return typeof v === 'string' ? v : '';
 }
 
-function bool(v: unknown): 0 | 1 {
-	return v === true ? 1 : 0;
-}
-
-/** Resolve a list of tag names to tag ids, creating tags that don't exist. */
-function resolveTagIds(db: Database.Database, names: string[]): number[] {
-	const insert = db.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)');
-	const select = db.prepare('SELECT id FROM tags WHERE name = ?');
-	const ids: number[] = [];
-	for (const raw of names) {
-		const name = raw.trim();
-		if (!name) continue;
-		insert.run(name);
-		const row = select.get(name) as { id: number } | undefined;
-		if (row) ids.push(row.id);
-	}
-	return ids;
-}
-
 /**
- * Persist one parsed recipe. Image files are written before the (synchronous)
- * DB transaction so the transaction stays atomic. Returns whether the recipe
- * was added, updated, or skipped.
+ * Persist one parsed recipe. New images are saved to disk before the DB
+ * transaction runs; any images the recipe previously had are only deleted
+ * from disk *after* the transaction commits, so a failure partway through
+ * (image processing or the write itself) can never leave the DB pointing at
+ * files that have already been removed.
  */
 async function upsertRecipe(
 	db: Database.Database,
@@ -58,8 +44,7 @@ async function upsertRecipe(
 
 	if (existing && conflict === 'skip') return 'skipped';
 
-	// Decode/process images up front (async); replace any prior images on update.
-	if (existing) deleteRecipeImages(id);
+	const oldImagePaths = existing ? getRecipeImages(db, id) : [];
 	const images = await saveRecipeImages(id, recipe.images);
 	const tagNames = Array.isArray(recipe.categories) ? recipe.categories : [];
 	const now = Date.now();
@@ -78,7 +63,6 @@ async function upsertRecipe(
 			).run(rowParams(id, recipe, existing.created_at, now));
 
 			db.prepare('DELETE FROM recipe_images WHERE recipe_id = ?').run(id);
-			db.prepare('DELETE FROM recipe_tags WHERE recipe_id = ?').run(id);
 			// Editing invalidates strike-through keys; clear stale progress.
 			db.prepare('DELETE FROM cook_progress WHERE recipe_id = ?').run(id);
 		} else {
@@ -100,54 +84,41 @@ async function upsertRecipe(
 		);
 		images.forEach((img, pos) => insImg.run(id, pos, img.path));
 
-		const insTag = db.prepare(
-			'INSERT OR IGNORE INTO recipe_tags (recipe_id, tag_id) VALUES (?, ?)'
-		);
-		for (const tagId of resolveTagIds(db, tagNames)) insTag.run(id, tagId);
+		setRecipeTags(db, id, tagNames);
 	});
 
 	tx();
+
+	// Now that the DB no longer references them, remove the recipe's old image
+	// files (new images were written under fresh random names, so this can't
+	// collide with what we just saved above).
+	for (const path of oldImagePaths) deleteImageFile(path);
+
 	return existing ? 'updated' : 'added';
 }
 
 function rowParams(id: string, r: MelaRecipe, createdAt: number, updatedAt: number) {
 	return {
 		id,
-		title: str(r.title),
-		text: str(r.text),
-		yield: str(r.yield),
-		prep_time: str(r.prepTime),
-		cook_time: str(r.cookTime),
-		total_time: str(r.totalTime),
-		ingredients: str(r.ingredients),
-		instructions: str(r.instructions),
-		notes: str(r.notes),
-		nutrition: str(r.nutrition),
-		link: str(r.link),
-		favorite: bool(r.favorite),
-		want_to_cook: bool(r.wantToCook),
+		...recipeColumnParams({
+			title: str(r.title),
+			text: str(r.text),
+			yield: str(r.yield),
+			prepTime: str(r.prepTime),
+			cookTime: str(r.cookTime),
+			totalTime: str(r.totalTime),
+			ingredients: str(r.ingredients),
+			instructions: str(r.instructions),
+			notes: str(r.notes),
+			nutrition: str(r.nutrition),
+			link: str(r.link),
+			favorite: r.favorite === true,
+			wantToCook: r.wantToCook === true
+		}),
 		date: appleDateToUnixMs(r.date),
 		created_at: createdAt,
 		updated_at: updatedAt
 	};
-}
-
-/**
- * Import a batch of parsed entries. Each recipe is handled independently: a
- * malformed or failing recipe is recorded and skipped without aborting the run.
- */
-export async function importEntries(
-	db: Database.Database,
-	entries: ParsedEntry[],
-	conflict: ConflictMode = 'skip'
-): Promise<ImportSummary> {
-	const summary: ImportSummary = { added: 0, updated: 0, skipped: 0, failed: 0, failures: [] };
-
-	for (const entry of entries) {
-		await importOne(db, entry, conflict, summary);
-	}
-
-	return summary;
 }
 
 /** Import a single parsed entry into the running summary. */
@@ -181,28 +152,6 @@ async function importOne(
 	}
 }
 
-/**
- * Stream-import one or more uploaded files. Recipes are parsed, imported, and
- * freed one at a time (decompressed archive buffers are released as we go), so
- * peak memory stays roughly constant regardless of library size — this is what
- * keeps a large `.melarecipes` import from OOM-killing the container.
- */
-export async function importUploads(
-	db: Database.Database,
-	uploads: { name: string; bytes: Uint8Array }[],
-	conflict: ConflictMode = 'skip'
-): Promise<ImportSummary> {
-	const summary: ImportSummary = { added: 0, updated: 0, skipped: 0, failed: 0, failures: [] };
-
-	for (const upload of uploads) {
-		await walkUpload(upload.name, upload.bytes, (entry) =>
-			importOne(db, entry, conflict, summary)
-		);
-	}
-
-	return summary;
-}
-
 function emptySummary(): ImportSummary {
 	return { added: 0, updated: 0, skipped: 0, failed: 0, failures: [] };
 }
@@ -222,10 +171,6 @@ function concatChunks(chunks: Uint8Array[]): Uint8Array {
 		off += c.length;
 	}
 	return out;
-}
-
-function isCruft(name: string): boolean {
-	return name.startsWith('__MACOSX/') || name.endsWith('/.DS_Store') || name === '.DS_Store';
 }
 
 interface PendingEntry {
@@ -261,7 +206,7 @@ async function importArchiveChunks(
 		const source = `${archiveName}/${file.name}`;
 		// Skip directories, macOS cruft, and non-recipe files: don't call
 		// file.start(), so their data is never decompressed/buffered.
-		if (file.name.endsWith('/') || isCruft(file.name) || (!isArchive && !isRecipe)) return;
+		if (file.name.endsWith('/') || isMacOsCruft(file.name) || (!isArchive && !isRecipe)) return;
 		started++;
 
 		const parts: Uint8Array[] = [];

@@ -22,6 +22,10 @@ Mela is lovely, but your recipes shouldn't be trapped in one app. Recipe Store i
 
 👩‍🍳 **Has a cooking mode** — distraction-free, big text, keeps the screen awake, and lets you tap ingredients and steps to strike them through. Your progress is saved per recipe, so you can wander off to answer the door and come back to exactly where you were.
 
+⏱️ **Times your steps** — cooking mode spots durations in the method ("fry for 1–2 minutes", "bake 1 hour 30 minutes") and turns them into one-tap timers. You can also start an arbitrary timer or save **quick-timer favourites** for sides that aren't in the method (rice 14 min, pasta 9 min) — favourites are shared across every device in the house. Run several at once; they keep correct time even if the tab is backgrounded, survive a reload, and ping you with a notification (plus a beep and a buzz) when they're done. Ranges ring at the lower bound so you can check the food early.
+
+📲 **Installs as an app** — it's a PWA, so you can add it to a phone or tablet home screen and run it full-screen, with the app shell cached for a quick launch. Timer notifications work best once installed (on iOS, adding to the Home Screen is required for notifications to fire).
+
 🌐 **Imports from the web** — paste a recipe URL and it reads the page's structured data (with a Claude-powered fallback for messy pages). If a site blocks automated access, paste the page source and it'll read the recipe straight out of that.
 
 💾 **Backs itself up** — nightly online SQLite backups (keeping the last 14), plus a "back up now" button, all inside the data volume your NAS snapshots already cover.
@@ -42,7 +46,7 @@ docker compose up -d --build
 
 Then open it at your `ORIGIN` and head to **Import** to bring your library in.
 
-> **Heads up:** `ORIGIN` must match the address you actually use (e.g. your Tailscale hostname) or uploads will be refused, and give the container a bit of memory headroom (the compose file requests 1 GB) — importing a big library decodes a lot of images.
+> **Heads up:** `ORIGIN` must match the address you actually use (e.g. your Tailscale hostname) or uploads will be refused, and give the container a bit of memory headroom (the compose file requests 1 GB) — importing a big library decodes a lot of images. The container runs as a non-root user (uid 1000); if `./data` already exists from an older version of the image, run `sudo chown -R 1000:1000 ./data` once so it stays writable.
 
 ### Developing
 
@@ -55,8 +59,22 @@ npm run check      # type-check
 
 The data lives under `./data` (SQLite DB + images + backups) — gitignored, and the single thing worth backing up.
 
+The PWA icons in `static/icons/` are generated from `src/lib/assets/favicon.svg`. If you change the logo, regenerate and commit them with `node scripts/gen-icons.mjs`. The service worker (`src/service-worker.ts`) only runs in a production build — test PWA install/offline behaviour with `npm run build && npm run preview`, not `npm run dev`.
+
 ## Status & design
 
 Everything above is built and tested. The full product spec — data model, Mela file format notes, concurrency strategy, and the decisions behind it all — lives in [`docs/PRD.md`](docs/PRD.md) if you want the deep dive.
 
 Made for a household that cooks. Enjoy! 🥘
+
+## Tags
+
+Tags follow a curated taxonomy in `src/lib/server/taxonomy.json` (cuisine, course, main ingredient, dietary, occasion). With `ANTHROPIC_API_KEY` set, the recipe edit page has a **Suggest tags** button that proposes tags from that taxonomy and your existing tags.
+
+One-off re-tag of the whole library:
+
+```bash
+node --env-file=.env scripts/retag.mjs --limit 20   # try a few first (dry run, writes data/retag-plan.json)
+node --env-file=.env scripts/retag.mjs --fresh      # classify everything (dry run)
+node scripts/retag.mjs --apply                      # back up the DB, then apply the reviewed plan
+```
