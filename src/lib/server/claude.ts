@@ -1,5 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { MelaRecipe } from './mela.js';
+import {
+	SUGGEST_SYSTEM_PROMPT,
+	buildSuggestSchema,
+	normaliseTags,
+	recipeDigest,
+	taxonomyTags
+} from './tagging.js';
 
 /** Whether the Claude-assisted URL import fallback is configured. */
 export function claudeAvailable(): boolean {
@@ -194,4 +201,61 @@ export async function cleanupRecipe(input: CleanupInput): Promise<CleanupInput> 
 	});
 
 	return extractCleanupFields(parseJsonResponse(response));
+}
+
+export interface TagSuggestions {
+	/** Suggestions drawn from the library's existing vocabulary. */
+	existing: string[];
+	/** Suggestions that would create a brand-new tag. */
+	new: string[];
+}
+
+/**
+ * Ask Claude to suggest tags for a recipe. `libraryTags` is the set of tags
+ * already in use; the canonical taxonomy is always included. Tags the recipe
+ * already has are excluded from the result.
+ */
+export async function suggestTags(
+	recipe: Pick<CleanupInput, 'title' | 'text' | 'ingredients' | 'instructions'>,
+	libraryTags: string[],
+	currentTags: string[]
+): Promise<TagSuggestions> {
+	if (!claudeAvailable()) throw new Error('Claude is not configured');
+
+	// Full de-duped vocabulary (not capped, so not via normaliseTags).
+	const seen = new Set<string>();
+	const vocab: string[] = [];
+	for (const t of [...taxonomyTags(), ...libraryTags]) {
+		const k = t.trim().toLowerCase();
+		if (!k || seen.has(k)) continue;
+		seen.add(k);
+		vocab.push(t.trim());
+	}
+
+	const client = new Anthropic();
+	const response = await client.messages.create({
+		model: modelId(),
+		max_tokens: 512,
+		system: SUGGEST_SYSTEM_PROMPT,
+		messages: [
+			{
+				role: 'user',
+				content:
+					`Library vocabulary: ${JSON.stringify(vocab)}\n` +
+					`Tags the recipe already has: ${JSON.stringify(currentTags)}\n\n` +
+					recipeDigest(recipe)
+			}
+		],
+		output_config: { format: { type: 'json_schema', schema: buildSuggestSchema(vocab) } }
+	});
+
+	const parsed = parseJsonResponse(response);
+	const have = new Set(currentTags.map((t) => t.toLowerCase()));
+	const notHave = (t: string) => !have.has(t.toLowerCase());
+	const existing = normaliseTags(Array.isArray(parsed.existing) ? parsed.existing : [], vocab).filter(notHave);
+	const known = new Set(vocab.map((t) => t.toLowerCase()));
+	const fresh = normaliseTags(Array.isArray(parsed.new) ? parsed.new : [])
+		.filter((t) => !known.has(t.toLowerCase()) && notHave(t))
+		.slice(0, 2);
+	return { existing, new: fresh };
 }

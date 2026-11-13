@@ -66,3 +66,15 @@ The PWA icons in `static/icons/` are generated from `src/lib/assets/favicon.svg`
 Everything above is built and tested. The full product spec — data model, Mela file format notes, concurrency strategy, and the decisions behind it all — lives in [`docs/PRD.md`](docs/PRD.md) if you want the deep dive.
 
 Made for a household that cooks. Enjoy! 🥘
+
+## Tags
+
+Tags follow a curated taxonomy in `src/lib/server/taxonomy.json` (cuisine, course, main ingredient, dietary, occasion). With `ANTHROPIC_API_KEY` set, the recipe edit page has a **Suggest tags** button that proposes tags from that taxonomy and your existing tags.
+
+One-off re-tag of the whole library:
+
+```bash
+node --env-file=.env scripts/retag.mjs --limit 20   # try a few first (dry run, writes data/retag-plan.json)
+node --env-file=.env scripts/retag.mjs --fresh      # classify everything (dry run)
+node scripts/retag.mjs --apply                      # back up the DB, then apply the reviewed plan
+```

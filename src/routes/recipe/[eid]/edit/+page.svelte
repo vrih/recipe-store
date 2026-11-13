@@ -39,6 +39,25 @@
 	let formVersion = $state(0);
 
 	let cleaningUp = $state(false);
+	let suggesting = $state(false);
+	let suggestions = $state<{ existing: string[]; new: string[] } | null>(null);
+
+	function splitTags(csv: string): string[] {
+		return csv.split(',').map((t) => t.trim()).filter(Boolean);
+	}
+
+	function addTag(tag: string) {
+		const tags = splitTags(currentTags);
+		if (!tags.some((t) => t.toLowerCase() === tag.toLowerCase())) tags.push(tag);
+		currentTags = tags.join(', ');
+		dirty = true;
+		if (suggestions) {
+			suggestions = {
+				existing: suggestions.existing.filter((t) => t !== tag),
+				new: suggestions.new.filter((t) => t !== tag)
+			};
+		}
+	}
 	let compare = $state<{ original: CleanupFields; cleaned: CleanupFields } | null>(null);
 
 	function chooseVersion(side: 'left' | 'right') {
@@ -138,9 +157,22 @@
 	oninput={() => (dirty = true)}
 	use:enhance={(submit) => {
 		const isCleanup = submit.action.search.includes('cleanup');
-		if (isCleanup) cleaningUp = true;
+		const isSuggest = submit.action.search.includes('suggestTags');
+		if (isSuggest) {
+			suggesting = true;
+			suggestions = null;
+		} else if (isCleanup) cleaningUp = true;
 		else saving = true;
 		return async ({ result, update }) => {
+			if (isSuggest) {
+				suggesting = false;
+				if (result.type === 'success' && result.data && 'tagSuggestions' in result.data) {
+					suggestions = result.data.tagSuggestions as { existing: string[]; new: string[] };
+				} else {
+					await update({ reset: false });
+				}
+				return;
+			}
 			if (isCleanup) {
 				cleaningUp = false;
 				if (result.type === 'success' && result.data && 'cleanupResult' in result.data) {
@@ -165,7 +197,7 @@
 >
 	<input type="hidden" name="version" value={data.recipe.version} />
 	{#key formVersion}
-		<RecipeForm recipe={currentRecipeValues} tags={currentTags} />
+		<RecipeForm recipe={currentRecipeValues} bind:tags={currentTags} />
 	{/key}
 
 	<div class="actions">
@@ -177,6 +209,24 @@
 		{/if}
 		<a href="/recipe/{data.eid}">Cancel</a>
 	</div>
+	{#if data.claudeAvailable}
+		<div class="suggest">
+			<button type="submit" formaction="?/suggestTags" class="secondary" disabled={saving || cleaningUp || suggesting}>
+				{suggesting ? 'Thinking…' : 'Suggest tags'}
+			</button>
+			{#if suggestions}
+				{#if suggestions.existing.length === 0 && suggestions.new.length === 0}
+					<span class="hint">No further tags to suggest.</span>
+				{/if}
+				{#each suggestions.existing as tag (tag)}
+					<button type="button" class="chip" onclick={() => addTag(tag)}>+ {tag}</button>
+				{/each}
+				{#each suggestions.new as tag (tag)}
+					<button type="button" class="chip new" onclick={() => addTag(tag)} title="Creates a new tag">+ {tag} <em>new</em></button>
+				{/each}
+			{/if}
+		</div>
+	{/if}
 </form>
 
 {#if compare}
@@ -281,6 +331,25 @@
 		background: #fff;
 		color: #1c1917;
 		border: 1px solid #d6d3d1;
+	}
+	.suggest {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 0.75rem;
+	}
+	.suggest .chip {
+		padding: 0.25rem 0.7rem;
+		border-radius: 999px;
+		font-size: 0.85rem;
+	}
+	.suggest .chip.new {
+		border-style: dashed;
+	}
+	.suggest .chip em {
+		font-size: 0.7rem;
+		color: #78716c;
 	}
 	button.danger {
 		color: #b91c1c;
