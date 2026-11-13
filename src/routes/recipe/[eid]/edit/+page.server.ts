@@ -1,7 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { PageServerLoad, Actions } from './$types';
 import db from '$lib/server/db';
-import { getRecipe, getRecipeImages, getRecipeTags } from '$lib/server/recipes';
+import { getRecipe, getRecipeImages, getRecipeTags, listTags } from '$lib/server/recipes';
 import {
 	updateRecipe,
 	deleteRecipe,
@@ -9,7 +9,7 @@ import {
 	ConflictError,
 	NotFoundError
 } from '$lib/server/edit';
-import { cleanupRecipe, claudeAvailable, pickCleanupFields } from '$lib/server/claude';
+import { cleanupRecipe, claudeAvailable, pickCleanupFields, suggestTags } from '$lib/server/claude';
 import { decodeId } from '$lib/ids';
 import { imageUrl } from '$lib/paths';
 
@@ -96,6 +96,25 @@ export const actions: Actions = {
 			return { cleanupResult: true as const, original: pickCleanupFields(input), cleaned };
 		} catch (err) {
 			return fail(502, { message: err instanceof Error ? err.message : 'Claude cleanup failed.' });
+		}
+	},
+
+	// Ask Claude to suggest tags for the currently-entered fields (no DB write).
+	suggestTags: async ({ request }) => {
+		if (!claudeAvailable()) return fail(422, { message: 'Claude is not configured.' });
+
+		const form = await request.formData();
+		const input = recipeInputFromForm(form);
+
+		try {
+			const suggestions = await suggestTags(
+				pickCleanupFields(input),
+				listTags(db).map((t) => t.name),
+				input.tags
+			);
+			return { tagSuggestions: suggestions };
+		} catch (err) {
+			return fail(502, { message: err instanceof Error ? err.message : 'Tag suggestion failed.' });
 		}
 	}
 };

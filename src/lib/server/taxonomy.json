@@ -1,0 +1,40 @@
+{
+	"facets": [
+		{
+			"name": "Cuisine",
+			"description": "The culinary tradition of the dish. At most one per recipe; omit if it has no clear tradition.",
+			"tags": [
+				"British", "American", "French", "Italian", "Spanish", "Greek", "Middle Eastern",
+				"Indian", "Chinese", "Japanese", "Korean", "Thai", "Vietnamese",
+				"Mexican", "West African"
+			]
+		},
+		{
+			"name": "Course",
+			"description": "Where the dish sits in a meal. One, occasionally two.",
+			"tags": [
+				"Breakfast", "Starter", "Main", "Side", "Soup", "Salad", "Dessert",
+				"Baking", "Snack", "Sauce & Condiment", "Drink"
+			]
+		},
+		{
+			"name": "Main ingredient",
+			"description": "The dominant protein or staple. Up to two; omit if none stands out.",
+			"tags": [
+				"Chicken", "Beef", "Pork", "Lamb", "Fish & Seafood", "Eggs", "Vegetables",
+				"Pasta", "Noodles", "Rice", "Pulses", "Tofu", "Cheese"
+			]
+		},
+		{
+			"name": "Dietary",
+			"description": "Only when the recipe as written contains no meat or fish (Vegetarian) or no animal products (Vegan). Never use both.",
+			"tags": ["Vegetarian", "Vegan"]
+		},
+		{
+			"name": "Occasion & style",
+			"description": "How or when you'd cook it. Only when clearly applicable.",
+			"tags": ["Weeknight", "Christmas", "Special occasion", "One-pot", "Batch cooking", "Packed lunch"]
+		}
+	],
+	"maxTagsPerRecipe": 6
+}

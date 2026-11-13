@@ -8,7 +8,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
 	}
 }));
 
-import { claudeAvailable, pickCleanupFields, cleanupRecipe } from './claude.js';
+import { claudeAvailable, pickCleanupFields, cleanupRecipe, suggestTags } from './claude.js';
 
 describe('claudeAvailable', () => {
 	const original = process.env.ANTHROPIC_API_KEY;
@@ -112,5 +112,44 @@ describe('cleanupRecipe', () => {
 		await expect(cleanupRecipe(pickCleanupFields({ title: 'Soup' }))).rejects.toThrow(
 			'Claude returned an unparseable response'
 		);
+	});
+});
+
+describe('suggestTags', () => {
+	const recipe = { title: 'Pad Thai', text: '', ingredients: 'noodles\nprawns', instructions: 'Stir fry.' };
+
+	beforeEach(() => {
+		createMock.mockReset();
+		process.env.ANTHROPIC_API_KEY = 'sk-test';
+	});
+
+	function respond(payload: unknown) {
+		createMock.mockResolvedValue({ content: [{ type: 'text', text: JSON.stringify(payload) }] });
+	}
+
+	it('returns existing and new suggestions, excluding tags the recipe already has', async () => {
+		respond({ existing: ['Thai', 'noodles', 'Main'], new: ['Street Food', 'Thai'] });
+		const out = await suggestTags(recipe, ['Thai', 'Noodles'], ['Main']);
+		expect(out.existing).toEqual(['Thai', 'Noodles']);
+		// "Thai" is already known so isn't offered as new.
+		expect(out.new).toEqual(['Street Food']);
+	});
+
+	it('drops "existing" tags that are not in the vocabulary', async () => {
+		respond({ existing: ['Klingon'], new: [] });
+		const out = await suggestTags(recipe, [], []);
+		expect(out.existing).toEqual([]);
+	});
+
+	it('passes the vocabulary as an enum in the schema', async () => {
+		respond({ existing: [], new: [] });
+		await suggestTags(recipe, ['Zesty'], []);
+		const schema = createMock.mock.calls[0][0].output_config.format.schema;
+		expect(schema.properties.existing.items.enum).toContain('Zesty');
+	});
+
+	it('throws when Claude is not configured', async () => {
+		delete process.env.ANTHROPIC_API_KEY;
+		await expect(suggestTags(recipe, [], [])).rejects.toThrow('not configured');
 	});
 });

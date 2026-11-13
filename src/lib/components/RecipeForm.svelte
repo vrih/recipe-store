@@ -15,7 +15,7 @@
 		wantToCook: boolean;
 	}
 
-	let { recipe, tags = '' }: { recipe: RecipeValues; tags?: string } = $props();
+	let { recipe, tags = $bindable('') }: { recipe: RecipeValues; tags?: string } = $props();
 </script>
 
 <div class="fields">
@@ -68,7 +68,7 @@
 
 	<label class="full">
 		<span>Tags <em>(comma-separated)</em></span>
-		<input name="tags" type="text" value={tags} />
+		<input name="tags" type="text" bind:value={tags} />
 	</label>
 
 	<label class="full">
