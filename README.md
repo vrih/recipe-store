@@ -71,10 +71,12 @@ Made for a household that cooks. Enjoy! 🥘
 
 Tags follow a curated taxonomy in `src/lib/server/taxonomy.json` (cuisine, course, main ingredient, dietary, occasion). With `ANTHROPIC_API_KEY` set, the recipe edit page has a **Suggest tags** button that proposes tags from that taxonomy and your existing tags.
 
-One-off re-tag of the whole library:
+One-off re-tag of the whole library. The script is baked into the Docker image, so run it in a one-off container (same data volume and `ANTHROPIC_API_KEY` as the app, no Node install needed on the host):
 
 ```bash
-node --env-file=.env scripts/retag.mjs --limit 20   # try a few first (dry run, writes data/retag-plan.json)
-node --env-file=.env scripts/retag.mjs --fresh      # classify everything (dry run)
-node scripts/retag.mjs --apply                      # back up the DB, then apply the reviewed plan
+docker compose run --rm recipe-store node scripts/retag.mjs --limit 20   # try a few first (dry run, writes data/retag-plan.json)
+docker compose run --rm recipe-store node scripts/retag.mjs --fresh      # classify everything (dry run)
+docker compose run --rm recipe-store node scripts/retag.mjs --apply      # back up the DB, then apply the reviewed plan
 ```
+
+Outside Docker (Node 22+): `node --env-file=.env scripts/retag.mjs …`.
