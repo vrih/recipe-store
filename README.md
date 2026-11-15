@@ -24,6 +24,8 @@ Mela is lovely, but your recipes shouldn't be trapped in one app. Recipe Store i
 
 ⏱️ **Times your steps** — cooking mode spots durations in the method ("fry for 1–2 minutes", "bake 1 hour 30 minutes") and turns them into one-tap timers. You can also start an arbitrary timer or save **quick-timer favourites** for sides that aren't in the method (rice 14 min, pasta 9 min) — favourites are shared across every device in the house. Run several at once; they keep correct time even if the tab is backgrounded, survive a reload, and ping you with a notification (plus a beep and a buzz) when they're done. Ranges ring at the lower bound so you can check the food early.
 
+🎄 **Playlists** — group recipes you're cooking together (Christmas dinner, say) and cook them side by side. Cook mode gets a tab bar to flick between the recipes, with a running-timer badge on each tab, and the timer strip shows every timer across the whole playlist.
+
 📲 **Installs as an app** — it's a PWA, so you can add it to a phone or tablet home screen and run it full-screen, with the app shell cached for a quick launch. Timer notifications work best once installed (on iOS, adding to the Home Screen is required for notifications to fire).
 
 🌐 **Imports from the web** — paste a recipe URL and it reads the page's structured data (with a Claude-powered fallback for messy pages). If a site blocks automated access, paste the page source and it'll read the recipe straight out of that.
