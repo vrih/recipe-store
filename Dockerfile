@@ -18,6 +18,9 @@ WORKDIR /app
 COPY --from=builder --chown=node:node /app/build ./build
 COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node package.json ./
+# One-off maintenance script (see README "Tags") and the shared tagging logic it imports.
+COPY --chown=node:node scripts/retag.mjs ./scripts/retag.mjs
+COPY --chown=node:node src/lib/server/tagging.js src/lib/server/taxonomy.json ./src/lib/server/
 
 EXPOSE 3000
 ENV PORT=3000

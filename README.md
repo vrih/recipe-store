@@ -24,6 +24,8 @@ Mela is lovely, but your recipes shouldn't be trapped in one app. Recipe Store i
 
 ⏱️ **Times your steps** — cooking mode spots durations in the method ("fry for 1–2 minutes", "bake 1 hour 30 minutes") and turns them into one-tap timers. You can also start an arbitrary timer or save **quick-timer favourites** for sides that aren't in the method (rice 14 min, pasta 9 min) — favourites are shared across every device in the house. Run several at once; they keep correct time even if the tab is backgrounded, survive a reload, and ping you with a notification (plus a beep and a buzz) when they're done. Ranges ring at the lower bound so you can check the food early.
 
+🎄 **Playlists** — group recipes you're cooking together (Christmas dinner, say) and cook them side by side. Cook mode gets a tab bar to flick between the recipes, with a running-timer badge on each tab, and the timer strip shows every timer across the whole playlist.
+
 📲 **Installs as an app** — it's a PWA, so you can add it to a phone or tablet home screen and run it full-screen, with the app shell cached for a quick launch. Timer notifications work best once installed (on iOS, adding to the Home Screen is required for notifications to fire).
 
 🌐 **Imports from the web** — paste a recipe URL and it reads the page's structured data (with a Claude-powered fallback for messy pages). If a site blocks automated access, paste the page source and it'll read the recipe straight out of that.
@@ -71,10 +73,12 @@ Made for a household that cooks. Enjoy! 🥘
 
 Tags follow a curated taxonomy in `src/lib/server/taxonomy.json` (cuisine, course, main ingredient, dietary, occasion). With `ANTHROPIC_API_KEY` set, the recipe edit page has a **Suggest tags** button that proposes tags from that taxonomy and your existing tags.
 
-One-off re-tag of the whole library:
+One-off re-tag of the whole library. The script is baked into the Docker image, so run it in a one-off container (same data volume and `ANTHROPIC_API_KEY` as the app, no Node install needed on the host):
 
 ```bash
-node --env-file=.env scripts/retag.mjs --limit 20   # try a few first (dry run, writes data/retag-plan.json)
-node --env-file=.env scripts/retag.mjs --fresh      # classify everything (dry run)
-node scripts/retag.mjs --apply                      # back up the DB, then apply the reviewed plan
+docker compose run --rm recipe-store node scripts/retag.mjs --limit 20   # try a few first (dry run, writes data/retag-plan.json)
+docker compose run --rm recipe-store node scripts/retag.mjs --fresh      # classify everything (dry run)
+docker compose run --rm recipe-store node scripts/retag.mjs --apply      # back up the DB, then apply the reviewed plan
 ```
+
+Outside Docker (Node 22+): `node --env-file=.env scripts/retag.mjs …`.

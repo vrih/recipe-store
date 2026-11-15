@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { detectTimes } from '$lib/times';
 	import TimerTray from '$lib/components/TimerTray.svelte';
@@ -10,15 +11,26 @@
 
 	let { data }: { data: PageData } = $props();
 
-	// Servings stepper
-	let servingsOverride = $state<number | null>(null);
+	// Servings stepper — remembered per recipe (in this browser) so it survives
+	// switching between recipes in a playlist and reloads.
+	const SERVINGS_KEY = 'hearth:cook-servings';
+	let servingsByEid = $state<Record<string, number>>({});
+	onMount(() => {
+		try {
+			servingsByEid = JSON.parse(localStorage.getItem(SERVINGS_KEY) ?? '{}') || {};
+		} catch {}
+	});
+	const servingsOverride = $derived(servingsByEid[data.eid] ?? null);
 	let currentServings = $derived(servingsOverride ?? data.baseServings ?? null);
 	const scale = $derived(
 		data.baseServings && currentServings ? currentServings / data.baseServings : 1
 	);
 	function adjServings(d: number) {
 		const base = currentServings ?? 1;
-		servingsOverride = Math.max(1, Math.min(50, base + d));
+		servingsByEid = { ...servingsByEid, [data.eid]: Math.max(1, Math.min(50, base + d)) };
+		try {
+			localStorage.setItem(SERVINGS_KEY, JSON.stringify(servingsByEid));
+		} catch {}
 	}
 
 	// Detect cookable durations in each step once.
@@ -60,7 +72,35 @@
 	const allDone = $derived(totalSteps > 0 && doneCount === totalSteps);
 
 	// Active timers for the dark strip
-	const activeTimers = $derived(timers.forRecipe(data.eid));
+	const playlistEids = $derived(new Set(data.playlist?.recipes.map((r) => r.eid) ?? []));
+	const activeTimers = $derived(
+		data.playlist
+			? timers.timers.filter((t) => playlistEids.has(t.recipeEid))
+			: timers.forRecipe(data.eid)
+	);
+	const titleByEid = $derived(new Map(data.playlist?.recipes.map((r) => [r.eid, r.title]) ?? []));
+
+	// Playlist switcher: per-recipe timer counts, prev/next.
+	const plIndex = $derived(data.playlist?.recipes.findIndex((r) => r.eid === data.eid) ?? -1);
+	const plHref = (eid: string) => `/recipe/${eid}/cook?playlist=${data.playlist?.id}`;
+	const prevRecipe = $derived(plIndex > 0 ? data.playlist!.recipes[plIndex - 1] : null);
+	const nextRecipe = $derived(
+		data.playlist && plIndex >= 0 && plIndex < data.playlist.recipes.length - 1
+			? data.playlist.recipes[plIndex + 1]
+			: null
+	);
+	function timerCount(eid: string) {
+		return timers.forRecipe(eid).filter((t) => t.status !== 'done').length;
+	}
+	function doneTimerCount(eid: string) {
+		return timers.forRecipe(eid).filter((t) => t.status === 'done').length;
+	}
+
+	// Mark this recipe as being cooked as soon as cook mode opens (also on switching
+	// between playlist recipes), so it shows up under "Cooking" before any ticks.
+	$effect(() => {
+		fetch(`/api/recipes/${data.eid}/cooking`, { method: 'PUT' }).catch(() => {});
+	});
 
 	// Wake Lock
 	const wakeSupported = typeof navigator !== 'undefined' && 'wakeLock' in navigator;
@@ -145,7 +185,8 @@
 					</div>
 				{/if}
 				<button type="button" class="reset-btn" onclick={reset}>Reset</button>
-				<a class="exit-btn" href="/recipe/{data.eid}">Exit</a>
+				<a class="exit-btn" href="/" title="Browse recipes without ending this one — it stays under Cooking in the nav">⌂ Recipes</a>
+				<a class="exit-btn" href={data.playlist ? `/playlists/${data.playlist.id}` : `/recipe/${data.eid}`}>Exit</a>
 			</div>
 		</div>
 		<div class="progress-row">
@@ -156,6 +197,29 @@
 		</div>
 	</header>
 
+	{#if data.playlist}
+		<nav class="pl-bar" aria-label="Playlist: {data.playlist.name}">
+			<a class="pl-arrow" class:off={!prevRecipe} href={prevRecipe ? plHref(prevRecipe.eid) : undefined} aria-label="Previous recipe" data-sveltekit-noscroll>‹</a>
+			<div class="pl-tabs">
+				{#each data.playlist.recipes as r (r.eid)}
+					{@const running = timerCount(r.eid)}
+					{@const finished = doneTimerCount(r.eid)}
+					<a
+						class="pl-tab"
+						class:active={r.eid === data.eid}
+						href={plHref(r.eid)}
+						aria-current={r.eid === data.eid ? 'page' : undefined}
+						data-sveltekit-noscroll
+					>
+						<span class="pl-title">{r.title || 'Untitled'}</span>
+						{#if finished > 0}<span class="pl-badge ring">{finished}</span>{:else if running > 0}<span class="pl-badge">⏱ {running}</span>{/if}
+					</a>
+				{/each}
+			</div>
+			<a class="pl-arrow" class:off={!nextRecipe} href={nextRecipe ? plHref(nextRecipe.eid) : undefined} aria-label="Next recipe" data-sveltekit-noscroll>›</a>
+		</nav>
+	{/if}
+
 	<!-- Dark timer strip -->
 	<div class="timer-strip">
 		<span class="strip-label">Timers</span>
@@ -164,7 +228,12 @@
 				{#each activeTimers as t (t.id)}
 					<div class="timer-card" class:done={t.status === 'done'}>
 						<div class="tc-top">
-							<span class="tc-label">{t.label}</span>
+							<span class="tc-label">
+								{#if data.playlist && t.recipeEid !== data.eid}
+									<a class="tc-from" href={plHref(t.recipeEid)}>{titleByEid.get(t.recipeEid) ?? 'Recipe'}</a>
+								{/if}
+								{t.label}
+							</span>
 							<button type="button" class="tc-dismiss" onclick={() => timers.dismiss(t.id)} aria-label="Dismiss">×</button>
 						</div>
 						<div class="tc-clock">
@@ -275,6 +344,18 @@
 </div>
 
 <style>
+	.pl-bar { flex-shrink: 0; display: flex; align-items: stretch; background: #fff; border-bottom: 1px solid #e9e1d4; }
+	.pl-arrow { display: flex; align-items: center; justify-content: center; width: 44px; flex-shrink: 0; font-size: 1.6rem; color: #2b2723; text-decoration: none; }
+	.pl-arrow.off { opacity: 0.25; pointer-events: none; }
+	.pl-tabs { display: flex; flex: 1; overflow-x: auto; scrollbar-width: none; gap: 0.25rem; padding: 0.4rem 0; }
+	.pl-tabs::-webkit-scrollbar { display: none; }
+	.pl-tab { display: inline-flex; align-items: center; gap: 0.4rem; flex-shrink: 0; max-width: 14rem; padding: 0.45rem 0.9rem; min-height: 44px; border-radius: 99px; border: 1px solid #e4dbcc; background: #f6f1e9; color: #6e665c; font-size: 0.85rem; font-weight: 700; text-decoration: none; }
+	.pl-tab.active { background: #2b2723; border-color: #2b2723; color: #fff; }
+	.pl-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.pl-badge { font-size: 0.72rem; background: #f4e8e0; color: #c0644a; padding: 0.1rem 0.45rem; border-radius: 99px; flex-shrink: 0; }
+	.pl-badge.ring { background: #c0644a; color: #fff; }
+	.tc-from { display: block; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.7; color: inherit; text-decoration: none; }
+
 	.cook {
 		display: flex;
 		flex-direction: column;

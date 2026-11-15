@@ -93,6 +93,36 @@ const MIGRATIONS = [
         UNIQUE (label, seconds)
       );
     `
+	},
+	{
+		name: '003_playlists',
+		up: `
+      -- Named, ordered groups of recipes cooked together (e.g. Christmas dinner).
+      CREATE TABLE playlists (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE playlist_recipes (
+        playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+        recipe_id   TEXT NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+        position    INTEGER NOT NULL,
+        PRIMARY KEY (playlist_id, recipe_id)
+      );
+      CREATE INDEX playlist_recipes_recipe ON playlist_recipes(recipe_id);
+    `
+	},
+	{
+		name: '004_cook_sessions',
+		up: `
+      -- A recipe counts as "being cooked" from the moment cook mode is opened,
+      -- until the user ends it explicitly (independent of ticked items).
+      CREATE TABLE cook_sessions (
+        recipe_id  TEXT PRIMARY KEY REFERENCES recipes(id) ON DELETE CASCADE,
+        updated_at INTEGER NOT NULL
+      );
+    `
 	}
 ] as const;
 

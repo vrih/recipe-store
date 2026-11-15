@@ -2,7 +2,7 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { page } from '$app/state';
 
-	let { children } = $props();
+	let { children, data } = $props();
 
 	const chrome = $derived(!page.url.pathname.endsWith('/cook'));
 </script>
@@ -15,6 +15,10 @@
 	<nav>
 		<a href="/" class="brand">Hearth</a>
 		<div class="nav-links">
+			{#if data.cookingCount > 0}
+				<a href="/cooking" class="cooking">🍳 Cooking ({data.cookingCount})</a>
+			{/if}
+			<a href="/playlists">Playlists</a>
 			<a href="/recipe/new">New</a>
 			<a href="/import">Import</a>
 			<a href="/settings">Settings</a>
@@ -92,6 +96,11 @@
 	nav a:not(.brand):hover {
 		background: #ede4d6;
 		color: #2b2723;
+	}
+
+	nav a.cooking {
+		background: #f4e8e0;
+		color: #c0644a;
 	}
 
 	main {

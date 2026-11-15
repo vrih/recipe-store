@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { detectTimes } from '$lib/times';
 	import { scaleIngredient } from '$lib/scaleIngredient';
@@ -29,6 +30,31 @@
 	function adjServings(d: number) {
 		const base = currentServings ?? 1;
 		servingsOverride = Math.max(1, Math.min(50, base + d));
+	}
+
+	// Add to playlist
+	async function addToPlaylist(e: Event) {
+		const sel = e.currentTarget as HTMLSelectElement;
+		let pid = sel.value;
+		sel.value = '';
+		if (!pid) return;
+		if (pid === 'new') {
+			const name = prompt('New playlist name');
+			if (!name?.trim()) return;
+			const res = await fetch('/api/playlists', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ name, recipeEid: page.params.eid })
+			});
+			if (res.ok) await invalidateAll();
+			return;
+		}
+		const res = await fetch(`/api/playlists/${pid}/recipes`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ eid: page.params.eid })
+		});
+		if (res.ok) await invalidateAll();
 	}
 
 	// Detect timers in each step.
@@ -97,6 +123,15 @@
 					{favorite ? '♥  Saved' : '♡  Save recipe'}
 				</button>
 			</form>
+			<select class="pl-select" onchange={addToPlaylist} aria-label="Add to playlist">
+				<option value="">＋ Add to playlist…</option>
+				{#each data.playlists as p (p.id)}
+					<option value={p.id} disabled={data.inPlaylists.includes(p.id)}>
+						{data.inPlaylists.includes(p.id) ? '✓ ' : ''}{p.name}
+					</option>
+				{/each}
+				<option value="new">New playlist…</option>
+			</select>
 		</div>
 	</div>
 
@@ -252,6 +287,7 @@
 	}
 	.btn-outline:hover { background: #f4e8e0; }
 
+	.pl-select { font: inherit; font-size: 0.85rem; font-weight: 600; margin-top: 0.5rem; padding: 0.45rem 0.6rem; border: 1px solid #e4dbcc; border-radius: 10px; background: #fff; color: #6e665c; }
 	.btn-cook {
 		display: inline-flex;
 		align-items: center;

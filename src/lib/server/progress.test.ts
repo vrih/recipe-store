@@ -54,3 +54,29 @@ describe('cook progress', () => {
 		expect(getProgress(db, 'r1')).toEqual([]);
 	});
 });
+
+describe('activeCooks', () => {
+	it('lists recently-touched recipes only', async () => {
+		const { activeCooks } = await import('./progress.js');
+		const Database = (await import('better-sqlite3')).default;
+		const { runMigrations } = await import('./migrate.js');
+		const db = new Database(':memory:');
+		db.pragma('foreign_keys = ON');
+		runMigrations(db);
+		for (const id of ['a', 'b'])
+			db.prepare('INSERT INTO recipes (id, title, created_at, updated_at) VALUES (?, ?, 0, 0)').run(id, id);
+		const ins = db.prepare("INSERT INTO cook_progress VALUES (?, 'step', ?, 1, ?)");
+		ins.run('a', 's1', 1_000_000);
+		ins.run('b', 's1', 1_000_000 - 8 * 24 * 3600_000);
+		const out = activeCooks(db, () => 4, 1_000_000);
+		expect(out.map((c) => c.id)).toEqual(['a']);
+		expect(out[0]).toMatchObject({ stepsDone: 1, stepsTotal: 4, playlistId: null });
+
+		// Opening cook mode counts with no ticks; ending it removes the recipe and its ticks.
+		const { startCooking, endCooking } = await import('./progress.js');
+		startCooking(db, 'b', 1_000_000);
+		expect(activeCooks(db, () => 4, 1_000_000).map((c) => c.id).sort()).toEqual(['a', 'b']);
+		endCooking(db, 'a');
+		expect(activeCooks(db, () => 4, 1_000_000).map((c) => c.id)).toEqual(['b']);
+	});
+});
