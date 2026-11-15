@@ -43,3 +43,69 @@ export function setProgress(
 export function resetProgress(db: Database.Database, recipeId: string): void {
 	db.prepare('DELETE FROM cook_progress WHERE recipe_id = ?').run(recipeId);
 }
+
+export interface ActiveCook {
+	id: string;
+	title: string;
+	stepsDone: number;
+	stepsTotal: number;
+	playlistId: number | null;
+}
+
+/**
+ * How recently a recipe must have been touched to count as "being cooked".
+ * Generous so multi-day cooks (prep starting days ahead) stay listed.
+ */
+export const ACTIVE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Mark a recipe as being cooked (called when cook mode opens). */
+export function startCooking(db: Database.Database, recipeId: string, now = Date.now()): void {
+	db.prepare(
+		`INSERT INTO cook_sessions (recipe_id, updated_at) VALUES (?, ?)
+		 ON CONFLICT(recipe_id) DO UPDATE SET updated_at = excluded.updated_at`
+	).run(recipeId, now);
+}
+
+/** Stop treating a recipe as being cooked, and clear its ticks. */
+export function endCooking(db: Database.Database, recipeId: string): void {
+	db.transaction(() => {
+		db.prepare('DELETE FROM cook_sessions WHERE recipe_id = ?').run(recipeId);
+		resetProgress(db, recipeId);
+	})();
+}
+
+/** Recipes with a cook session or progress touched within the window, most recent first. */
+export function activeCooks(
+	db: Database.Database,
+	totalSteps: (instructions: string) => number,
+	now = Date.now()
+): ActiveCook[] {
+	const rows = db
+		.prepare(
+			`WITH activity AS (
+			   SELECT recipe_id, updated_at FROM cook_sessions
+			   UNION ALL
+			   SELECT recipe_id, updated_at FROM cook_progress WHERE done = 1
+			 )
+			 SELECT r.id, r.title, r.instructions,
+			   (SELECT COUNT(*) FROM cook_progress WHERE recipe_id = r.id AND kind = 'step' AND done = 1) AS steps_done,
+			   MAX(a.updated_at) AS last,
+			   (SELECT playlist_id FROM playlist_recipes WHERE recipe_id = r.id ORDER BY playlist_id DESC LIMIT 1) AS playlist_id
+			 FROM activity a JOIN recipes r ON r.id = a.recipe_id
+			 GROUP BY r.id HAVING last >= ? ORDER BY last DESC`
+		)
+		.all(now - ACTIVE_WINDOW_MS) as {
+		id: string;
+		title: string;
+		instructions: string;
+		steps_done: number;
+		playlist_id: number | null;
+	}[];
+	return rows.map((r) => ({
+		id: r.id,
+		title: r.title,
+		stepsDone: r.steps_done,
+		stepsTotal: totalSteps(r.instructions),
+		playlistId: r.playlist_id
+	}));
+}

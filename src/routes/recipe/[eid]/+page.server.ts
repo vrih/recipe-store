@@ -4,6 +4,7 @@ import db from '$lib/server/db';
 import { getRecipe, getRecipeImages, getRecipeTags, setFavorite } from '$lib/server/recipes';
 import { renderMarkdown, renderInline } from '$lib/server/markdown';
 import { parseIngredients, parseInstructions } from '$lib/server/parse';
+import { listPlaylists, playlistIdsForRecipe } from '$lib/server/playlists';
 import { decodeId } from '$lib/ids';
 import { imageUrl } from '$lib/paths';
 
@@ -46,6 +47,8 @@ export const load: PageServerLoad = ({ params }) => {
 			text: s.text,
 			html: s.type === 'step' ? renderMarkdown(s.text) : ''
 		})),
+		playlists: listPlaylists(db),
+		inPlaylists: playlistIdsForRecipe(db, id),
 		notesHtml: renderMarkdown(recipe.notes),
 		nutritionHtml: renderMarkdown(recipe.nutrition)
 	};

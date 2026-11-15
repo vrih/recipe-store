@@ -6,9 +6,10 @@ import { parseIngredients, parseInstructions } from '$lib/server/parse';
 import { renderInline, renderMarkdown } from '$lib/server/markdown';
 import { getProgress } from '$lib/server/progress';
 import { listFavorites } from '$lib/server/timerFavorites';
-import { decodeId } from '$lib/ids';
+import { getPlaylist } from '$lib/server/playlists';
+import { decodeId, encodeId } from '$lib/ids';
 
-export const load: PageServerLoad = ({ params }) => {
+export const load: PageServerLoad = ({ params, url }) => {
 	let id: string;
 	try {
 		id = decodeId(params.eid);
@@ -19,7 +20,16 @@ export const load: PageServerLoad = ({ params }) => {
 	const recipe = getRecipe(db, id);
 	if (!recipe) throw error(404, 'Recipe not found');
 
+	// Optional playlist context: ?playlist=<id> adds a switcher across its recipes.
+	const pid = Number(url.searchParams.get('playlist'));
+	const pl = Number.isInteger(pid) && pid > 0 ? getPlaylist(db, pid) : null;
+	const playlist =
+		pl && pl.recipes.some((r) => r.id === id)
+			? { id: pl.id, name: pl.name, recipes: pl.recipes.map((r) => ({ eid: encodeId(r.id), title: r.title })) }
+			: null;
+
 	return {
+		playlist,
 		eid: params.eid,
 		title: recipe.title,
 		yield: recipe.yield,
